@@ -19,7 +19,9 @@ workspace, use its `python atlas.py` launcher. For advanced existing Atlas layou
 | annotate | annota | Save an attributed observation, auto or explicit links |
 | link | collega | Save an explicit relationship, backed by a durable note |
 | dependencies | dipendenze | Inspect candidate links, warnings and omitted count |
-| notes | appunti | Full note bodies, stale bindings, revocation |
+| notes | appunti | Full note bodies, binding review, rebind, revocation, import |
+| events | eventi | Journal of index and memory changes; chain verification |
+| serve | servi | MCP server on stdin/stdout |
 | graph | grafo | Export offline HTML, JSON and Obsidian snapshots |
 | status | stato | Extraction coverage and memory review state |
 | export | esporta | Regenerate the structural Markdown preview |
@@ -34,6 +36,12 @@ python atlas.py annotate "Observation" --title "Topic" --collega REFERENCE --aut
 python atlas.py link FROM_REFERENCE TO_REFERENCE --note "Why this matters" --workspace workspaces/main
 python atlas.py notes 1 --workspace workspaces/main
 python atlas.py notes --revoke 1 --workspace workspaces/main
+python atlas.py notes --review --workspace workspaces/main
+python atlas.py notes --rebind 1 --author "Reviewer name" --workspace workspaces/main
+python atlas.py notes --import other/_atlas/memory.json --workspace workspaces/main
+python atlas.py events --since 0 --workspace workspaces/main
+python atlas.py events --verify --workspace workspaces/main
+python atlas.py serve --workspace workspaces/main
 python atlas.py update --workspace workspaces/main --verifica
 python atlas.py graph --workspace workspaces/main --rebuild
 ```
@@ -65,10 +73,37 @@ not the normal source consultation workflow.
 ## Recovery
 
 Run `update --ricostruisci --verifica` to regenerate derived text and references.
-Identical source revisions can retain/rebind observations; changed revisions are
-left stale for review. Do not delete `_atlas/`: it contains durable notes, not
+After any update a note stays bound where its annotated text is found again
+unchanged, once, in the same file under the same headings. `notes --review`
+lists the others: a `drifted` binding has a proposed passage, a similarity and
+the kind of words that changed (`number`, `negation`, `modality`, `condition`,
+`context`, `path`); a `stale` one has none. `--rebind` records that the named
+person accepted the proposals of one note. An agent must not accept on its own. Do not delete `_atlas/`: it contains durable notes, not
 only disposable caches. Back up the whole workspace. `memory.json` is a human
-readable backup/export; automated import and legacy migration are not implemented.
+readable backup/export. `notes --import FILE` merges such a file from another
+workspace: the same note is never duplicated, a revocation always wins, and a
+remote `confirmed` label arrives as `proposed` unless `--keep-status` is given.
+
+## Several agents
+
+Reading commands never wait. Note operations queue for up to 15 seconds behind
+another writer; `build`/`update` stop at once if a writer is active. `events
+--since N` tells a process what changed after the last sequence number it saw.
+
+## MCP
+
+`serve` reads JSON-RPC from stdin and writes to stdout. Example host entry:
+
+```json
+{"mcpServers": {"synapse-kb": {"command": "python",
+  "args": ["/absolute/path/to/atlas.py", "serve", "--workspace", "/absolute/path/to/workspaces/main"]}}}
+```
+
+Tools: search, read, explore, dependencies, status, notes, review_bindings,
+events, annotate, link, revoke_note, accept_rebind, update. Results carry the
+same JSON as `--json`. Resources `synapse://status`, `synapse://notes` and
+`synapse://events` can be subscribed to. Host configuration formats differ;
+only the Python SDK client has been exercised.
 
 Editing/deleting `appunti_condivisi.md` does not alter the database. Use
 `notes --revoke ID`. The generated HTML/Obsidian files are snapshots. CLI note

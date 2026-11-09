@@ -7,7 +7,10 @@
 `view.py` verifies sources and returns bounded text, provenance and continuations.
 `graph.py` creates candidate dependencies from lexical anchors and conditional
 cues; it makes no model calls. `memory.py` owns attributed observations and
-derived note/manual links. `visuals.py` produces offline snapshots.
+derived note/manual links. `reconcile.py` decides where a binding points after
+a source changed. `relations.py` types cue sentences and recognises stated
+references. `events.py` is the append-only journal. `mcp_server.py` exposes the
+CLI operations over MCP stdio. `visuals.py` produces offline snapshots.
 `workspace.py` and `cli.py` implement setup, configuration and command routing.
 
 The extraction/navigation engine was adapted from the author's earlier Atlas
@@ -28,10 +31,17 @@ patching and embedded alternative CLI implementations have been removed.
 | memory.json / appunti_condivisi.md | Generated backups/views; not independently authoritative |
 | visuals/ | Bounded snapshots containing source excerpts; private by default |
 
-A manual binding records source path, full SHA-256, byte range and passage hash.
-Reindexing may change node IDs. A binding is restored only to the same source
-revision and passage coordinates/hash. A changed/removed/renamed source leaves a
-stale binding, retained for explicit review. There is no fuzzy reassignment.
+A manual binding records source path, full SHA-256, byte range, passage hash,
+the passage text and its heading path. Reindexing may change node IDs. After a
+source changes, the binding is restored automatically only when the identical
+text (whitespace aside) occurs exactly once in the same file under the same
+heading path. Changed wording, a renamed heading or a moved file produce a
+proposal with a similarity figure and named changes; a person accepts it and
+the earlier binding is kept in the note's history. Otherwise the binding stays
+stale. Similarity never activates a binding: see EVOLUTION.md for the measurement.
+
+Every index build, graph build and memory mutation appends a row to `events`
+in the same transaction. Each row hashes its predecessor.
 
 Graph rebuilding clears only derived dependencies and link tables. It never
 deletes notes. Revocation disables note injection and its manual relationships.
@@ -39,8 +49,12 @@ Deleting the generated Markdown cannot silently change memory state.
 
 ## Consistency
 
-The public CLI serializes operations per index with an OS-backed lock. Source
-indexing commits its SQLite changes transactionally. Graph construction commits
+The database uses WAL. Reading commands take no lock and see one committed
+snapshot. Mutations hold an OS-backed lock per index: note operations wait up
+to 15 seconds, builds fail at once if another writer is active. Derived text
+of a superseded revision is deleted immediately, so a reader that started
+before a concurrent update may be told to retry; it never receives other text.
+Source indexing commits its SQLite changes transactionally. Graph construction commits
 separately and records the index edition. If these phases are interrupted,
 edition mismatch prevents stale graph injection. Export is a separate, retryable
 operation; no claim is made that the complete filesystem update is atomic.
@@ -54,8 +68,11 @@ is checked during update/graph export. Hashes detect changed bytes, not factual 
 
 An edge A → B means “while reading A, inspect candidate B”. The destination may
 contain an exception or prerequisite. It is not a proof that B governs A.
-The current algorithm matches English/Italian cue patterns, distinctive shared
-phrases and headings, with bounded per-node selection. Its scores are not
+Two resolvers feed it. The lexical one matches English/Italian cue patterns,
+distinctive shared phrases and headings (`origin: heuristic`). The reference
+one follows what a document states: a Markdown link, a cited file name, or a
+cited heading whose title is unique in the corpus (`origin: reference`).
+Selection is bounded per node. Its scores are not
 calibrated confidence values. Broad or misleading headings remain a known risk.
 
 HTML embeds escaped JSON and uses DOM text nodes for source text. It contains

@@ -86,14 +86,17 @@ def classify_passage_cues(text: str, is_volatile_file: bool) -> list[tuple[str, 
     return results
 
 
-def _evidence(passage, text, meta_, resolver):
-    """Where the cue sentence is, as bytes of the normalized text, plus its hash."""
-    start, end = meta_['chars']
-    a = passage['start'] + len(text[:start].encode('utf-8'))
-    raw = text[start:end].encode('utf-8')
-    data = {'resolver': resolver, 'cue_in': passage['ref'], 'sentence_bytes': [a, a + len(raw)],
-            'sentence_sha256': hashlib.sha256(raw).hexdigest()}
-    data.update({k: v for k, v in meta_.items() if k != 'chars'})
+def _locate(passage_start, text, chars):
+    """Byte range of a sentence in the normalized source text, and its hash."""
+    a = passage_start + len(text[:chars[0]].encode('utf-8'))
+    raw = text[chars[0]:chars[1]].encode('utf-8')
+    return [a, a + len(raw)], hashlib.sha256(raw).hexdigest()
+
+
+def _evidence(ref, meta_, resolver):
+    """Where the cue sentence is, so a reader can check it against the source."""
+    data = {'resolver': resolver, 'cue_in': ref, 'sentence_bytes': meta_['span'][0], 'sentence_sha256': meta_['span'][1]}
+    data.update({k: v for k, v in meta_.items() if k not in ('chars', 'span')})
     return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -130,18 +133,21 @@ def explicit_references(passages, texts):
             return
         raw = text[span[0]:span[1]]
         cue = clean(raw, 220)
-        info = {'chars': span, 'relation': 'reference', 'resolved_by': how}
+        located = _locate(src['start'], text, span)
+        info = {'span': located, 'relation': 'reference', 'resolved_by': how}
         yield (src_idx, dst_idx, 'riferimento_esplicito', anchor, cue, REFERENCE_SCORE,
-               _evidence(src, text, info, 'explicit_reference'))
+               _evidence(src['ref'], info, 'explicit_reference'))
         found = analyze(raw)
         if found:
             # The citing sentence qualifies what it cites: a reader of the cited
             # rule should be sent to the passage that restricts or replaces it.
-            info = {'chars': span} | {k: found[k] for k in ('relation', 'cue', 'condition', 'consequence', 'negated')}
+            info = {'span': located} | {k: found[k] for k in ('relation', 'cue', 'condition', 'consequence', 'negated')}
             yield (dst_idx, src_idx, found['kind'], anchor, cue, REFERENCE_SCORE - 5,
-                   _evidence(src, text, info, 'explicit_reference'))
+                   _evidence(src['ref'], info, 'explicit_reference'))
 
     for src_idx, src in enumerate(passages):
+        if not src['may_refer']:
+            continue  # decided while the text was in memory; avoids a second read of the corpus
         text = texts(src_idx)
         spans = list(sentence_spans(text))
         for link in MARKDOWN_LINK.finditer(text):
@@ -198,7 +204,11 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
             body_phrases = set(extract_phrases(text))
             head_phrases = set(extract_phrases(heading_text))
             is_vol = bool(VOLATILE_PATH_RE.search(src['path']))
+            cues = classify_passage_cues(text, is_vol)
+            for cue in cues:
+                cue[4]['span'] = _locate(r['start'], text, cue[4]['chars'])
             passages.append({
+                'may_refer': bool(REFERENCE_CUE.search(text) or MARKDOWN_LINK.search(text)),
                 'id': r['id'],
                 'ref': reference(db, r['id']),
                 'sid': r['sid'],
@@ -213,7 +223,7 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                 'body_phrases': body_phrases,
                 'all_phrases': head_phrases | body_phrases,
                 'is_volatile': is_vol,
-                'cues': classify_passage_cues(text, is_vol),
+                'cues': cues,
             })
 
         def passage_text(idx):
@@ -342,7 +352,7 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                 seen_sec[sec] += 1
                 if not isinstance(evidence, str):
                     holder, cue_meta = evidence
-                    evidence = _evidence(passages[holder], passage_text(holder), cue_meta, 'lexical_anchor')
+                    evidence = _evidence(passages[holder]['ref'], cue_meta, 'lexical_anchor')
                 picked.append((passages[src_idx]['id'], passages[dst_idx]['id'], kind, anchor, cue, score,
                                json.loads(evidence).get('relation', ''), origin, evidence))
                 by_kind[kind] += 1

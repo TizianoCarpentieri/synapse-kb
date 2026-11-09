@@ -7,7 +7,7 @@ struttura, ricerca locale, collegamenti candidati e appunti condivisi.
 L'agente ti guida nella configurazione: documenti già esistenti o nuova raccolta,
 regole personalizzate oppure comportamento predefinito.
 
-Versione **alpha 0.1.0a1**. Il progetto funziona come strumento locale; il vantaggio
+Versione **alpha 0.2.0a1**. Il progetto funziona come strumento locale; il vantaggio
 sulla qualità delle risposte richiede ancora un confronto indipendente.
 
 ## Avvio con l'agente

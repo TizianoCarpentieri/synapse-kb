@@ -37,7 +37,7 @@
         "source": {"type": "string"}, "target": {"type": "string"},
         "kind": {"type": "string"}, "cue": {"type": "string"},
         "anchor": {"type": "string"}, "score": {"type": "number"},
-        "origin": {"type": "string"}, "count": {"type": "integer", "minimum": 1}
+        "origin": {"type": "string"}, "relation": {"type": "string"}, "count": {"type": "integer", "minimum": 1}
       }
     }
   }

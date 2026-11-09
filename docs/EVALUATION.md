@@ -24,8 +24,11 @@ heuristics generalize. The demo was designed alongside the implementation.
    passages. Separate development examples from a held-out evaluation set.
 2. Include ordinary rules, cross-file exceptions, prerequisites, scope ambiguity,
    conflicting versions, missing evidence, irrelevant notes and misleading titles.
-3. Compare the same model/host/configuration under three conditions: ordinary
-   filesystem tools; Atlas structure/search with `--no-graph`; full graph and notes.
+3. Compare the same model/host/configuration under four conditions: ordinary
+   filesystem tools; Atlas structure/search with `--no-graph`; full graph and
+   notes; and, where the corpus fits, the whole corpus placed in the context
+   window with no tool. The last one tests whether large windows make
+   navigation unnecessary or make missed exceptions more frequent.
 4. Use fresh sessions, randomized condition order and the same tool/output budget.
    Avoid carrying notes from one condition into another. Record model/version,
    prompt, corpus revision, random settings if available and actual tool traces.

@@ -34,7 +34,10 @@ copy private corpora, generated indexes, source excerpts, credentials or persona
 absolute paths into tracked files. Existing workspaces are ignored by Git.
 Keep Italian CLI compatibility and English aliases. Preserve H1–H6 and context,
 explicit continuation cursors, coverage gaps and source verification.
+A layer that ranks or proposes may be heuristic; a layer that states a reference,
+quote, hash or binding must be checkable by equality (docs/EVOLUTION.md).
 Keep automatic graph candidates separate from durable manual observations.
 After relevant code changes run `python pack.py`, `python -m unittest discover -v`
-and `python scripts/evaluate_demo.py`. Use `python scripts/audit_public.py` before
+and `python scripts/evaluate_demo.py`. Run `python scripts/benchmark.py scale`
+before and after changes to indexing, graph or memory cost. Use `python scripts/audit_public.py` before
 packaging a public snapshot. Do not spawn sub-agents unless the user asks.

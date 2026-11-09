@@ -6,12 +6,13 @@ Local document navigation, dependency candidates and shared observations for
 LLM agents with filesystem and terminal access. Start with a folder you already
 have; let your agent guide the setup and apply your own working rules.
 
-**Status: alpha, 0.1.0a1.** This is a working toolkit and an experimental contract
+**Status: alpha, 0.2.0a1.** This is a working toolkit and an experimental contract
 for evidence navigation. It is not an established standard or a proven improvement
 in model accuracy. See [evaluation](docs/EVALUATION.md) and [limitations](docs/LIMITATIONS.md).
 
 [Italiano](README.it.md) · [Agent setup](docs/ONBOARDING.md) ·
 [Commands](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[0.2 review and benchmarks](docs/EVOLUTION.md) ·
 [Before publishing](docs/PUBLISHING.md)
 
 ## Try it
@@ -93,9 +94,17 @@ all visual layout, tables or images. See [format support](docs/FORMATS.md).
 
 - Original document paths, H1–H6 context, source hashes and continuation cursors.
 - Local full-text search and structural navigation, without embeddings.
-- Candidate exceptions, prerequisites and conditional relationships across files.
+- Candidate exceptions, prerequisites, scope limits and superseding notices
+  across files, plus links and cited headings a document states itself. Each
+  candidate names its relation, its origin and the byte range of its cue.
 - Attributed shared notes, explicit links, expiry and revocation. Notes start as
   **proposed observations**, separate from source evidence.
+- Notes follow their passage through edits while the annotated text is
+  identical; changed text becomes a flagged proposal for a person to accept.
+- A hash-chained journal of every index and memory change; concurrent readers;
+  memory import between workspaces.
+- An MCP stdio server (`python atlas.py serve --workspace workspaces/main`)
+  with the same operations and change notifications. Standard library only.
 - HTML and Obsidian graph views with no CDN or server requirement.
 - Source code, synthetic regression tests, portable build script and a draft
   [interoperability contract](docs/CONTRACT.md).
@@ -123,8 +132,9 @@ It does not require vector embeddings or a full-corpus LLM rewrite. Dependency
 scores are lexical rankings, not verified logic or confidence probabilities.
 
 Automatic memory is an observation mechanism, not autonomous policy learning.
-Manual links survive updates; a changed source revision leaves the old binding
-visible for review instead of silently reattaching it elsewhere.
+Manual links survive updates. A note is re-attached automatically only where
+its annotated text is found again unchanged, once, in the same file and under
+the same headings. A changed passage is proposed for review, never assumed.
 
 ## Build and verify
 
@@ -133,6 +143,7 @@ python -m pip install -r requirements-dev.txt
 python pack.py
 python -m unittest discover -v
 python scripts/evaluate_demo.py
+python scripts/benchmark.py reconcile
 python scripts/audit_public.py
 python -m build
 ```
