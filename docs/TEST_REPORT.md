@@ -25,12 +25,12 @@ not re-run for 0.2.
 | Concurrency | Reads during a held writer lock; six parallel note writers; journal chain intact |
 | MCP, raw JSON-RPC | Handshake, version fallback, tools, errors, subscription notification |
 | MCP, official Python SDK client 2.3.0 | Handshake (negotiated 2025-06-18), tool list and calls, error result, resource list and read |
+| GitHub Actions, commit 6696500 | Succeeded: Ubuntu, Windows and macOS with Python 3.11, 3.12 and 3.13, pinned pypdf 6.21.1, including the package build |
 | Public-file audit | Passed on the reviewed source set; heuristic, not a secret/rights guarantee |
 
 ## Not run / not established
 
-- GitHub Actions; Windows and macOS for 0.2; the pinned pypdf 6.21.1.
-- Wheel and source distribution builds (`python -m build` was not installed).
+- Wheel and source distribution builds in the local container (`python -m build` was not installed there; CI ran them).
 - The HTML viewer in a browser after the 0.2 changes (edges gained one field).
 - MCP in Claude Desktop, IDE hosts or other SDKs; the subscription
   notification through the SDK client; protocol revision 2026-07-28.
