@@ -77,5 +77,9 @@ calibrated confidence values. Broad or misleading headings remain a known risk.
 
 HTML embeds escaped JSON and uses DOM text nodes for source text. It contains
 no CDN, fetch or external script. Macro view groups passages by source and top
-heading; micro view shows passages and notes. Exports preserve incoming/outgoing
+heading; micro view shows passages and notes. Both add folder and document
+nodes joined by `struttura` edges: these say where a text is stored and are
+not dependency candidates, so they are excluded from every relationship count.
+The Obsidian vault repeats the source folder tree, names notes after the
+document and heading, and never overwrites a file it did not generate. Exports preserve incoming/outgoing
 links and disclose selection limits; the CLI remains the place for fuller reads.

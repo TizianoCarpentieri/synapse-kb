@@ -27,7 +27,8 @@
       "properties": {
         "id": {"type": "string"}, "label": {"type": "string"},
         "path": {"type": "string"}, "line": {"type": "integer"},
-        "folder": {"type": "string"}, "command": {"type": "string"}
+        "folder": {"type": "string"}, "command": {"type": "string"},
+        "type": {"enum": ["folder", "document", "section", "passage", "note"]}
       }
     },
     "edge": {

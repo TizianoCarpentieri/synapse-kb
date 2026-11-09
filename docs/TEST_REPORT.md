@@ -14,7 +14,8 @@ not re-run for 0.2.
 
 | Check | Result |
 |---|---|
-| Full unittest suite | 107 tests passed, about 7 s, also with ResourceWarning as error |
+| Full unittest suite | 110 tests passed, about 7 s, also with ResourceWarning as error |
+| HTML graph in headless Chromium | Rendered on a 52-source generated corpus; folder filter, level switch, "Only linked" and node inspection exercised; no page errors, no external requests |
 | Portable archive | Built; offline bundle test passed |
 | Synthetic retrieval | 2/2 expected cross-file targets within first six candidates |
 | Synthetic memory lifecycle | Automatic note visible; revocation effective |
@@ -31,7 +32,8 @@ not re-run for 0.2.
 ## Not run / not established
 
 - Wheel and source distribution builds in the local container (`python -m build` was not installed there; CI ran them).
-- The HTML viewer in a browser after the 0.2 changes (edges gained one field).
+- The generated vault opened in Obsidian itself, including whether its graph
+  honours the written colour groups; only the files were inspected.
 - MCP in Claude Desktop, IDE hosts or other SDKs; the subscription
   notification through the SDK client; protocol revision 2026-07-28.
 - Any local model: none could be downloaded, so no model latency or memory

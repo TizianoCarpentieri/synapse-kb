@@ -461,6 +461,69 @@ class McpTests(Workspace):
         self.assertEqual([e['actor'] for e in events.read(self.index, 2)['events']], ['agent-7', 'agent-7'])
 
 
+class VisualTests(Workspace):
+    documents = {
+        'Lavoro/Progetti: 2026/piano.md': '# Piano annuale\n\nThe Vega return window is cited here; see Vega return window.\n',
+        'wiki/vega.md': RULE,
+        'sciolto.txt': 'Text without headings and without a folder.\n',
+    }
+
+    def vault(self):
+        return self.index / 'visuals' / 'obsidian'
+
+    def files(self):
+        return sorted(p.relative_to(self.vault()).as_posix() for p in self.vault().rglob('*.md'))
+
+    def test_vault_mirrors_folders_with_readable_names_and_tags(self):
+        files = self.files()
+        self.assertIn('Lavoro/Progetti 2026/piano — Piano annuale.md', files)
+        self.assertIn('Lavoro/Progetti 2026/piano (md).md', files)
+        self.assertIn('wiki/vega — Returns.md', files)
+        self.assertIn('sciolto — text.md', files)
+        self.assertFalse([f for f in files if 'section-' in f])
+        note = (self.vault() / 'Lavoro/Progetti 2026/piano — Piano annuale.md').read_text(encoding='utf-8')
+        self.assertIn('tags: ["Lavoro/Progetti-2026"]', note)
+        self.assertIn('Document: [[Lavoro/Progetti 2026/piano (md)|piano.md]]', note)
+        self.assertIn('[[wiki/vega — Returns|Returns]]', note)  # the stated reference, by readable name
+        hub = (self.vault() / 'wiki/vega (md).md').read_text(encoding='utf-8')
+        self.assertIn('- [[wiki/vega — Returns|Returns]]', hub)
+        groups = json.loads((self.vault() / '.obsidian/graph.json').read_text(encoding='utf-8'))['colorGroups']
+        self.assertEqual([g['query'] for g in groups], ['path:"Lavoro"', 'path:"wiki"'])
+
+    def test_vault_follows_renames_and_keeps_what_a_person_wrote(self):
+        from atlas_core.visuals import export_graph
+        mine = self.vault() / 'wiki' / 'vega — Returns 2.md'
+        mine.write_text('mine', encoding='utf-8')
+        settings = self.vault() / '.obsidian' / 'graph.json'
+        settings.write_text('{"mine": true}', encoding='utf-8')
+        collision = self.vault() / 'wiki' / 'vega — Refunds.md'
+        collision.write_text('written by a person before the heading was renamed', encoding='utf-8')
+        self.rewrite('wiki/vega.md', lambda t: t.replace('# Returns', '# Refunds'))
+        files = self.files()
+        self.assertNotIn('wiki/vega — Returns.md', files)
+        self.assertEqual(collision.read_text(encoding='utf-8'), 'written by a person before the heading was renamed')
+        self.assertTrue([f for f in files if f.startswith('wiki/vega — Refunds ') and f != 'wiki/vega — Refunds.md'])
+        self.assertEqual(mine.read_text(encoding='utf-8'), 'mine')
+        self.assertEqual(settings.read_text(encoding='utf-8'), '{"mine": true}')
+        (self.source / 'Lavoro/Progetti: 2026/piano.md').unlink()
+        update(self.source, self.index)
+        self.assertFalse((self.vault() / 'Lavoro').exists())
+        export_graph(self.index)
+        self.assertEqual(self.files(), sorted(set(self.files())))
+
+    def test_graph_snapshot_has_folder_and_document_hubs(self):
+        data = json.loads((self.index / 'visuals/graph.json').read_text(encoding='utf-8'))
+        for level in ('macro', 'micro'):
+            nodes = {n['id']: n for n in data[level]['nodes']}
+            self.assertEqual(sorted(n['label'] for n in nodes.values() if n['type'] == 'folder'), ['Lavoro', 'Root', 'wiki'])
+            self.assertEqual(sum(n['type'] == 'document' for n in nodes.values()), 3)
+            structure = [e for e in data[level]['edges'] if e['kind'] == 'struttura']
+            leaves = {n['id'] for n in nodes.values() if n['type'] in ('section', 'passage')}
+            self.assertEqual({e['target'] for e in structure if e['target'] in leaves}, leaves)  # nothing floats alone
+            self.assertTrue(all(e['source'] in nodes and e['target'] in nodes for e in data[level]['edges']))
+            self.assertEqual(data[level]['total_edges'], sum(e['kind'] != 'struttura' for e in data[level]['edges']))
+
+
 class DocxTableTests(unittest.TestCase):
     def test_table_row_stays_on_one_line(self):
         ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'

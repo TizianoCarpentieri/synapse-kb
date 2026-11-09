@@ -17,6 +17,13 @@
 - DOCX table rows are kept on one line.
 - Saving a note no longer scans the corpus.
 - `scripts/benchmark.py`; results in docs/EVOLUTION.md.
+- Obsidian vault mirrors the source folders: readable file names, one hub note
+  per document, folder tags, and graph colours per folder unless the vault
+  already has its own graph settings. Files from the earlier flat layout
+  (`section-….md`) are removed on the next export; notes you added stay.
+- HTML graph: folders and documents are nodes, colours and a legend follow the
+  source folder, relationships are drawn clearly, the view fits the window,
+  and "Only linked" hides everything without a relationship.
 
 Changed behaviour: a note on an untouched passage of an edited file stays
 bound (0.1 marked it stale). `memory.json` uses `synapse-kb-memory-2`. The
