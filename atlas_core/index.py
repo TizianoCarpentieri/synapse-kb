@@ -40,6 +40,9 @@ CREATE INDEX IF NOT EXISTS node_source ON nodes(sid,kind,start);
 CREATE INDEX IF NOT EXISTS node_heading ON nodes(sid,level,start) WHERE kind='heading';
 CREATE TABLE IF NOT EXISTS dirs(path TEXT PRIMARY KEY,node INTEGER NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(title,body,tokenize='unicode61 remove_diacritics 2');
+CREATE TABLE IF NOT EXISTS events(
+ seq INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT NOT NULL,actor TEXT NOT NULL,kind TEXT NOT NULL,
+ payload TEXT NOT NULL,prev TEXT NOT NULL,hash TEXT NOT NULL);
 '''
 
 
@@ -56,12 +59,19 @@ def connect(index: Path, write=False):
     if not write and not path.is_file():
         raise AtlasError('Indice assente. Eseguire prima: atlas prepara CARTELLA')
     if write:
-        db = sqlite3.connect(path, timeout=2, factory=ClosingConnection)
+        db = sqlite3.connect(path, timeout=15, factory=ClosingConnection)
+        # WAL: readers keep a consistent snapshot while one writer commits, so
+        # consultation no longer needs the exclusive operation lock. Filesystems
+        # that refuse WAL keep the rollback journal; correctness is unchanged.
+        try:
+            db.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError:
+            pass
         db.executescript(SQL)
         db.execute('PRAGMA cache_size=-24000')
         db.execute('PRAGMA temp_store=FILE')
     else:
-        db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=2, factory=ClosingConnection)
+        db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=15, factory=ClosingConnection)
     db.row_factory = sqlite3.Row
     return db
 
@@ -378,6 +388,10 @@ def _build(root: Path, output=None, profile=DEFAULT_PROFILE, words=None, fanout=
         if not meta(db, 'identity'):
             set_meta(db, 'identity', uuid.uuid4().hex)
         directory(db, '.')
+        # Bindings written before quotes existed are completed while the revision
+        # they point at is still indexed; afterwards nothing could recover the text.
+        from .memory import capture_quotes
+        capture_quotes(db, output)
         seen = set()
         for path, relative in inventory(root, output, patterns):
             seen.add(relative)
@@ -445,6 +459,8 @@ def _build(root: Path, output=None, profile=DEFAULT_PROFILE, words=None, fanout=
         set_meta(db, 'built', time.strftime('%Y-%m-%dT%H:%M:%S%z'))
         set_meta(db, 'edition', time.time_ns())
         set_meta(db, 'exclusions', json_text(sorted(IGNORED) + patterns))
+        from .events import append
+        append(db, 'index_built', {'edition': meta(db, 'edition'), **counters})
         db.commit()
         counts = db.execute('SELECT count(*) n,coalesce(sum(words),0) words FROM sources').fetchone()
         counters.update(fonti=counts['n'], parole=counts['words'],

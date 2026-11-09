@@ -195,13 +195,37 @@ def docx(path, warnings):
         if images:
             warnings.append(f'{images} immagini/disegni non interpretati.')
         if tables:
-            warnings.append(f'{tables} tabelle: testo dei paragrafi in ordine XML; geometria non ricostruita.')
+            warnings.append(f'{tables} tabelle: una riga di testo per riga di tabella, celle separate da |; celle unite e tabelle annidate non ricostruite.')
         if any(e.tag in {W + 'ins', W + 'del', W + 'moveFrom', W + 'moveTo'} for e in root.iter()):
             warnings.append('DOCX con revisioni tracciate: lettura XML non equivalente a una versione accettata. Verificare originale.')
-        for n, p in enumerate(root.iter(W + 'p'), 1):
-            text = wtext(p)
-            level = heading(p) if text.strip() else 0
-            yield Piece(('#' * level + ' ' if level else '') + text + '\n', level, clean(text, 400), 'stile Word', f'paragrafo {n}')
+
+        def blocks(node):
+            for child in node:
+                if child.tag in {W + 'p', W + 'tbl'}:
+                    yield child
+                else:
+                    yield from blocks(child)
+
+        n = table = 0
+        for block in blocks(root):
+            if block.tag == W + 'p':
+                n += 1
+                text = wtext(block)
+                level = heading(block) if text.strip() else 0
+                yield Piece(('#' * level + ' ' if level else '') + text + '\n', level, clean(text, 400), 'stile Word', f'paragrafo {n}')
+                continue
+            table += 1
+            # A row stays one line, so a value keeps the other cells of its row
+            # next to it instead of becoming a column of unrelated paragraphs.
+            # Direct rows only: a nested table is read as text of the cell that holds it.
+            for r, row in enumerate(block.findall(W + 'tr'), 1):
+                cells = []
+                for cell in row.findall(W + 'tc'):
+                    paragraphs = [wtext(p).strip() for p in cell.iter(W + 'p')]
+                    n += len(paragraphs)
+                    cells.append(' '.join(t for t in paragraphs if t).replace('|', '/'))
+                if any(cells):
+                    yield Piece(' | '.join(cells) + '\n', location=f'tabella {table}, riga {r}')
 
 
 def pdf(path, warnings):

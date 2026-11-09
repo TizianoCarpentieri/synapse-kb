@@ -94,6 +94,24 @@ def query_words(text):
     return list(dict.fromkeys(natural + ['atlasexact' + value.casefold().encode('utf-8').hex() for value in exact]))[:24]
 
 
+def stem_prefix(word):
+    """Conservative inflection stripping (English/Italian) for prefix search.
+
+    Not a linguistic stemmer: it only removes a plural/verbal ending or final
+    vowels and never shortens below four letters. Returns the word unchanged
+    when nothing is removed.
+    """
+    if len(word) < 5 or not word.isalpha() or not word.isascii():
+        return word
+    for suffix in ('ing', 'ies', 'ed', 'es', 's'):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[:-len(suffix)]
+    cut = word
+    while len(cut) > 4 and cut[-1] in 'aeiou' and len(word) - len(cut) < 2:
+        cut = cut[:-1]
+    return cut
+
+
 def safe_child(root: Path, relative: str) -> Path:
     result = (root / relative).resolve()
     if not result.is_relative_to(root.resolve()):

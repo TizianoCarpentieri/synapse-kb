@@ -33,8 +33,8 @@ def export_graph(index: Path):
                         command='python atlas.py read ' + reference(db, row['id']) + ' --vicini 1')
             passages[row['id']] = item
             sections.setdefault(section_id, dict(item, id=section_id, label=crumbs[0] if crumbs else src['path']))
-        rows = [dict(r) for r in db.execute('SELECT *,"heuristic" origin,NULL note_id FROM dependencies UNION ALL '
-                                           'SELECT src,dst,kind,anchor,cue,score,"explicit" origin,note_id FROM manual_edges ORDER BY score DESC,src,dst')]
+        rows = [dict(r) for r in db.execute('SELECT src,dst,kind,anchor,cue,score,origin,relation,NULL note_id FROM dependencies UNION ALL '
+                                           'SELECT src,dst,kind,anchor,cue,score,"explicit" origin,"" relation,note_id FROM manual_edges ORDER BY score DESC,src,dst')]
         active_notes = {r['id']: dict(r) for r in db.execute('SELECT * FROM shared_notes ORDER BY id') if eligible(r)}
         rows = [r for r in rows if not r['note_id'] or r['note_id'] in active_notes]
         links = [dict(r) for r in db.execute('SELECT * FROM note_links ORDER BY note_id,node_id') if r['note_id'] in active_notes]
@@ -46,7 +46,8 @@ def export_graph(index: Path):
         if not src or not dst:
             continue
         edge = dict(source=src['id'], target=dst['id'], kind=row['kind'], cue=row['cue'],
-                    anchor=row['anchor'], score=row['score'], origin=row['origin'], count=1)
+                    anchor=row['anchor'], score=row['score'], origin=row['origin'],
+                    relation=row['relation'], count=1)
         edges.append(edge)
         if src['section'] != dst['section']:
             key = (src['section'], dst['section'], row['kind'])

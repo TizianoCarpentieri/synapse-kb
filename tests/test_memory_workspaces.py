@@ -84,12 +84,25 @@ class WorkspaceMemoryTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM manual_edges').fetchone()[0], 1)
         self.assertEqual(memory.notes(self.index)[0]['stale_bindings'], 0)
 
-    def test_changed_source_binding_is_not_guessed(self):
+    def test_unchanged_passage_follows_a_new_revision_by_equality(self):
         memory.add_note(self.index, 'Keep this observation.', 'Manual relationship', [self.rule], [self.exception])
         file = self.source / 'manuals/orion.md'
-        file.write_text(file.read_text(encoding='utf-8') + '\nNew revision.\n', encoding='utf-8')
+        file.write_text('# Preface\n\nAdded above.\n\n' + file.read_text(encoding='utf-8') + '\nNew revision.\n', encoding='utf-8')
         update(self.source, self.index)
-        self.assertEqual(memory.notes(self.index)[0]['stale_bindings'], 1)
+        note = memory.notes(self.index)[0]
+        self.assertEqual(note['stale_bindings'], 0)
+        self.assertEqual(sorted(b['state'] for b in note['bindings']), ['exact', 'relocated'])
+        with connect(self.index) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM manual_edges').fetchone()[0], 1)
+
+    def test_changed_passage_binding_is_not_guessed(self):
+        memory.add_note(self.index, 'Keep this observation.', 'Manual relationship', [self.rule], [self.exception])
+        file = self.source / 'manuals/orion.md'
+        file.write_text(file.read_text(encoding='utf-8').replace('thirty days', 'fourteen days'), encoding='utf-8')
+        update(self.source, self.index)
+        note = memory.notes(self.index)[0]
+        self.assertEqual(note['stale_bindings'], 1)
+        self.assertEqual(note['rebind_proposals'], 1)
         with connect(self.index) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM manual_edges').fetchone()[0], 0)
         self.assertEqual(len(memory.notes(self.index)), 1)

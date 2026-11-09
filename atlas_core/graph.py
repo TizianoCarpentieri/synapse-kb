@@ -1,4 +1,4 @@
-"""Local lexical dependency candidates, adapted from the Atlas prototype.
+"""Local dependency candidates: lexical anchors plus resolved explicit references.
 Scores rank candidates; they are not calibrated probabilities or verified rules.
 """
 from __future__ import annotations
@@ -8,18 +8,20 @@ import math
 from pathlib import Path
 import re
 import time
+import hashlib
+import posixpath
 import unicodedata
+from urllib.parse import unquote
 from .common import STOP, GENERIC, clean
 from .index import connect, reference, meta, set_meta
 from .view import read_bytes, check_source
-from .memory import DEP_SCHEMA, sync_memory
+from .memory import ensure_schema, sync_memory
+from .relations import CUES, MARKDOWN_LINK, REFERENCE_CUE, analyze, sentence_spans
+from . import events
 
 DOMAIN_GENERIC = STOP | GENERIC | set("document documents file files section sections page pages example examples note notes testo documento documenti sezione capitolo pagina pagine righe esempio informazione informazioni generale procedura procedure prerequisite prerequisites exception exceptions condition conditions conditional rule rules workflow workflows standard scope general prerequisito prerequisiti eccezione eccezioni condizione condizioni vincolo vincoli regola regole ambito".split())
-PATTERNS = [
- ('eccezione_deroga', 1.35, re.compile(r"\b(?:except|unless|excluding|not applicable|does not apply|incompatible|eccezion\w+|in deroga|salvo|esclus[oi]|non si applica|incompatibil\w+|solo per)\b", re.I)),
- ('prerequisito_vincolo', 1.25, re.compile(r"\b(?:prerequisite\w*|only if|before proceeding|provided that|requires|must first|prerequisit\w+|prima di procedere|previa verifica|solo se|a condizione che|obbligatori\w+|richiede che|verificare prima|accertarsi che|vincol\w+)\b", re.I)),
- ('biforcazione_caso', 1.10, re.compile(r"\b(?:if|in case of|depending on|otherwise|nel caso in cui|qualora|se il|se la|in caso di|a seconda che|se invece|laddove|distinguere se)\b", re.I)),
-]
+PATTERNS = [(kind, weight, pattern) for kind, _, weight, pattern in CUES]  # 0.1 name, kept for importers
+REFERENCE_SCORE = 60.0
 VOLATILE_PATH_RE = re.compile(r'(?:volatile|updates?|appunt|aggiornament|avvis)', re.I)
 VOLATILE_SENT_RE = re.compile(r'^\s*(?:note|warning|attention|update|nota bene|attenzione|avviso|aggiornamento)\b', re.I)
 
@@ -60,32 +62,125 @@ def split_sentences(text: str) -> list[str]:
     return [clean(s, 220) for s in raw if len(s.strip()) >= 18]
 
 
-def classify_passage_cues(text: str, is_volatile_file: bool) -> list[tuple[str, float, str, set[str]]]:
-    """Individua frasi con marcatori di dipendenza/eccezione/prerequisito nel passaggio."""
+def classify_passage_cues(text: str, is_volatile_file: bool) -> list[tuple[str, float, str, set[str], dict]]:
+    """Sentences carrying a relation cue, with the sentence span inside the passage."""
     results = []
-    for sent in split_sentences(text):
+    for start, end in sentence_spans(text):
+        raw = text[start:end]
+        sent = clean(raw, 220)
         sent_phrases = set(extract_phrases(sent))
         if not sent_phrases:
             continue
+        where = {'chars': (start, end)}
         matched = False
         if VOLATILE_SENT_RE.search(sent):
-            results.append(('appunto_volatile', 1.45, sent, sent_phrases))
+            results.append(('appunto_volatile', 1.45, sent, sent_phrases, where | {'relation': 'volatile_note'}))
             matched = True
-        for kind, weight, pattern in PATTERNS:
-            if pattern.search(sent):
-                results.append((kind, weight, sent, sent_phrases))
-                matched = True
-                break
+        found = analyze(raw)
+        if found:
+            results.append((found['kind'], found['weight'], sent, sent_phrases,
+                            where | {k: found[k] for k in ('relation', 'cue', 'condition', 'consequence', 'negated')}))
+            matched = True
         if not matched and is_volatile_file:
-            results.append(('appunto_volatile', 1.30, sent, sent_phrases))
+            results.append(('appunto_volatile', 1.30, sent, sent_phrases, where | {'relation': 'volatile_note'}))
     return results
+
+
+def _evidence(passage, text, meta_, resolver):
+    """Where the cue sentence is, as bytes of the normalized text, plus its hash."""
+    start, end = meta_['chars']
+    a = passage['start'] + len(text[:start].encode('utf-8'))
+    raw = text[start:end].encode('utf-8')
+    data = {'resolver': resolver, 'cue_in': passage['ref'], 'sentence_bytes': [a, a + len(raw)],
+            'sentence_sha256': hashlib.sha256(raw).hexdigest()}
+    data.update({k: v for k, v in meta_.items() if k != 'chars'})
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+
+
+def _title_key(title):
+    return tuple(re.findall(r"[^\W_]+", norm_text(title)))
+
+
+def explicit_references(passages, texts):
+    """Edges for references a document states itself: a link, a file name, a cited heading.
+
+    A heading is resolved only when its title is unique in the corpus and is
+    more than a generic word. Yields (src_idx, dst_idx, kind, anchor, cue, score, evidence).
+    """
+    first_of_section, first_of_source, by_path, by_name = {}, {}, {}, defaultdict(set)
+    for idx, p in enumerate(passages):
+        first_of_source.setdefault(p['sid'], idx)
+        by_path[p['path']] = p['sid']
+        by_name[posixpath.basename(p['path']).casefold()].add(p['sid'])
+        if p['crumbs']:
+            first_of_section.setdefault((p['sid'], tuple(p['crumbs'])), idx)
+    titles = defaultdict(set)
+    for (sid, crumbs), idx in first_of_section.items():
+        key = _title_key(crumbs[-1])
+        if len(key) > 8 or not key:
+            continue
+        specific = [w for w in key if w not in DOMAIN_GENERIC and len(w) >= 4]
+        if len(specific) >= 2 or (len(key) == 1 and len(key[0]) >= 6 and specific):
+            titles[key].add(idx)
+    unique_titles = {key: next(iter(v)) for key, v in titles.items() if len(v) == 1}
+
+    def emit(src_idx, dst_idx, anchor, text, span, how):
+        src, dst = passages[src_idx], passages[dst_idx]
+        if src_idx == dst_idx or src['section_key'] == dst['section_key']:
+            return
+        raw = text[span[0]:span[1]]
+        cue = clean(raw, 220)
+        info = {'chars': span, 'relation': 'reference', 'resolved_by': how}
+        yield (src_idx, dst_idx, 'riferimento_esplicito', anchor, cue, REFERENCE_SCORE,
+               _evidence(src, text, info, 'explicit_reference'))
+        found = analyze(raw)
+        if found:
+            # The citing sentence qualifies what it cites: a reader of the cited
+            # rule should be sent to the passage that restricts or replaces it.
+            info = {'chars': span} | {k: found[k] for k in ('relation', 'cue', 'condition', 'consequence', 'negated')}
+            yield (dst_idx, src_idx, found['kind'], anchor, cue, REFERENCE_SCORE - 5,
+                   _evidence(src, text, info, 'explicit_reference'))
+
+    for src_idx, src in enumerate(passages):
+        text = texts(src_idx)
+        spans = list(sentence_spans(text))
+        for link in MARKDOWN_LINK.finditer(text):
+            target = unquote(link.group(2))
+            if re.match(r'[a-z][a-z0-9+.-]*:', target, re.I):
+                continue
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(src['path']), target))
+            sid = by_path.get(resolved)
+            if sid is not None and sid != src['sid']:
+                span = next(((a, b) for a, b in spans if a <= link.start() < b), (link.start(), link.end()))
+                yield from emit(src_idx, first_of_source[sid], resolved, text, span, 'markdown link')
+        for start, end in spans:
+            sentence = text[start:end]
+            cue = REFERENCE_CUE.search(sentence)
+            if not cue:
+                continue
+            tail = sentence[cue.end():]
+            for name in re.findall(r"[\w./-]+\.[A-Za-z0-9]{2,5}\b", tail):
+                sids = by_name.get(posixpath.basename(name).casefold(), ())
+                if len(sids) == 1 and next(iter(sids)) != src['sid']:
+                    yield from emit(src_idx, first_of_source[next(iter(sids))], name, text, (start, end), 'file name')
+            words = _title_key(tail)[:24]
+            position = 0
+            while position < len(words):
+                for length in range(min(8, len(words) - position), 0, -1):
+                    target = unique_titles.get(words[position:position + length])
+                    if target is not None:
+                        yield from emit(src_idx, target, ' '.join(words[position:position + length]),
+                                        text, (start, end), 'unique heading title')
+                        position += length - 1
+                        break
+                position += 1
 
 
 def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
     """Costruisce la tabella `dependencies` in `_atlas/atlas.sqlite` senza stampare testi."""
     started = time.perf_counter()
     with connect(index_dir, write=True) as db:
-        db.executescript(DEP_SCHEMA)
+        ensure_schema(db)
         db.execute('BEGIN IMMEDIATE')
         db.execute('DELETE FROM dependencies')
         checked = set()
@@ -110,6 +205,8 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                 'path': src['path'],
                 'line': r['line'],
                 'end_line': r['end_line'],
+                'start': r['start'],
+                'end': r['end'],
                 'crumbs': crumbs,
                 'section_key': (r['sid'], tuple(crumbs[:2]) if crumbs else (r['label'],)),
                 'head_phrases': head_phrases,
@@ -119,10 +216,15 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                 'cues': classify_passage_cues(text, is_vol),
             })
 
+        def passage_text(idx):
+            p = passages[idx]
+            return read_bytes(db, index_dir, sources[p['sid']], p['start'], p['end']).decode('utf-8', errors='replace')
+
         n_passages = len(passages)
         if not n_passages:
             sync_memory(db, index_dir)
             set_meta(db, 'graph_edition', meta(db, 'edition'))
+            events.append(db, 'graph_built', {'edition': meta(db, 'edition'), 'edges': 0})
             db.commit()
             return {'passages': 0, 'edges': 0}
 
@@ -161,13 +263,13 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
             for ph in p['valid_all_anchors']:
                 body_by_anchor[ph].append(idx)
 
-        candidate_edges = defaultdict(list)  # src_idx -> list of (score, dst_idx, kind, anchor, cue)
+        candidate_edges = defaultdict(list)  # src_idx -> list of (score, dst_idx, kind, anchor, cue, evidence, origin)
 
         for dst_idx, dst in enumerate(passages):
             if not dst['cues'] or not dst['valid_all_anchors']:
                 continue
             # Per ogni frase condizionale/eccezione/appunto in dst, cerchiamo le sezioni principali src
-            for kind, kind_mult, cue_sent, sent_phrases in dst['cues']:
+            for kind, kind_mult, cue_sent, sent_phrases, cue_meta in dst['cues']:
                 sent_anchors = {ph for ph in sent_phrases if ph in anchor_weight}
                 active_anchors = sent_anchors or dst['valid_head_anchors']
                 if not active_anchors:
@@ -213,7 +315,12 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                     score = round(base_score * kind_mult * cross_file_bonus * in_sent_bonus * head_to_head_bonus, 3)
 
                     if score >= 7.5:
-                        candidate_edges[src_idx].append((score, dst_idx, kind, best_anchor, cue_sent))
+                        candidate_edges[src_idx].append((score, dst_idx, kind, best_anchor, cue_sent, (dst_idx, cue_meta), 'heuristic'))
+
+        reference_count = 0
+        for src_idx, dst_idx, kind, anchor, cue, score, evidence in explicit_references(passages, passage_text):
+            candidate_edges[src_idx].append((score, dst_idx, kind, anchor, cue, evidence, 'reference'))
+            reference_count += 1
 
         # Selezione diversificata per ogni nodo sorgente
         inserted = []
@@ -225,7 +332,7 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
             picked = []
             seen_dst = set()
             seen_sec = Counter()
-            for score, dst_idx, kind, anchor, cue in items:
+            for score, dst_idx, kind, anchor, cue, evidence, origin in items:
                 if dst_idx in seen_dst:
                     continue
                 sec = passages[dst_idx]['section_key']
@@ -233,7 +340,11 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
                     continue
                 seen_dst.add(dst_idx)
                 seen_sec[sec] += 1
-                picked.append((passages[src_idx]['id'], passages[dst_idx]['id'], kind, anchor, cue, score))
+                if not isinstance(evidence, str):
+                    holder, cue_meta = evidence
+                    evidence = _evidence(passages[holder], passage_text(holder), cue_meta, 'lexical_anchor')
+                picked.append((passages[src_idx]['id'], passages[dst_idx]['id'], kind, anchor, cue, score,
+                               json.loads(evidence).get('relation', ''), origin, evidence))
                 by_kind[kind] += 1
                 if passages[src_idx]['sid'] != passages[dst_idx]['sid']:
                     cross_file_count += 1
@@ -242,11 +353,12 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
             inserted.extend(picked)
 
         db.executemany(
-            'INSERT OR REPLACE INTO dependencies(src, dst, kind, anchor, cue, score) VALUES(?,?,?,?,?,?)',
+            'INSERT OR REPLACE INTO dependencies(src, dst, kind, anchor, cue, score, relation, origin, evidence) VALUES(?,?,?,?,?,?,?,?,?)',
             inserted
         )
         sync_memory(db, index_dir)
         set_meta(db, 'graph_edition', meta(db, 'edition'))
+        events.append(db, 'graph_built', {'edition': meta(db, 'edition'), 'edges': len(inserted)})
         db.commit()
 
     elapsed = round(time.perf_counter() - started, 3)
@@ -259,6 +371,7 @@ def build_dependencies(index_dir: Path, max_out_per_node: int = 5) -> dict:
         'edges_total': len(inserted),
         'edges_cross_file': cross_file_count,
         'edges_by_kind': dict(by_kind),
+        'edges_from_explicit_references': sum(x[7] == 'reference' for x in inserted),
         'nodes_with_outgoing_deps': nodes_with_out,
         'nodes_with_incoming_deps': nodes_with_in,
         'nodes_involved': nodes_involved,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import re
@@ -30,7 +31,8 @@ def parser():
     aliases = {'prepara': ['build'], 'aggiorna': ['update'], 'esplora': ['explore'],
                'cerca': ['search'], 'leggi': ['read'], 'stato': ['status'],
                'esporta': ['export'], 'annota': ['annotate'], 'collega': ['link'],
-               'dipendenze': ['dependencies'], 'appunti': ['notes'], 'grafo': ['graph']}
+               'dipendenze': ['dependencies'], 'appunti': ['notes'], 'grafo': ['graph'],
+               'eventi': ['events'], 'servi': ['serve']}
     for name, names in aliases.items():
         c = sub.add_parser(name, aliases=names)
         c.set_defaults(command=name)
@@ -90,6 +92,16 @@ def parser():
         elif name == 'appunti':
             c.add_argument('id', nargs='?', type=int)
             c.add_argument('--revoke', type=int)
+            c.add_argument('--review', action='store_true', help='Bindings that are not verified by identical text.')
+            c.add_argument('--rebind', type=int, metavar='ID', help='A person accepts the proposed new passages of a note.')
+            c.add_argument('--import', dest='import_file', type=Path, metavar='MEMORY_JSON',
+                           help='Merge notes exported by another workspace.')
+            c.add_argument('--keep-status', action='store_true', help='With --import: keep "confirmed" labels.')
+            c.add_argument('--author', default='agent')
+        elif name == 'eventi':
+            c.add_argument('--since', type=int, default=0)
+            c.add_argument('--limit', type=int, default=200)
+            c.add_argument('--verify', '--verifica', action='store_true', help='Recompute the hash chain.')
         elif name == 'grafo':
             c.add_argument('--rebuild', action='store_true')
     return p
@@ -102,7 +114,9 @@ def update(source, index, profile=DEFAULT_PROFILE, **kwargs):
     result['dependencies'] = build_dependencies(index)
     memory.backup(index)
     result['visuals'] = export_graph(index)
-    result['notes_to_review'] = sum(bool(n['stale_bindings']) for n in memory.notes(index) if n['active'])
+    notes = [n for n in memory.notes(index) if n['active']]
+    result['notes_to_review'] = sum(bool(n['stale_bindings']) for n in notes)
+    result['bindings'] = dict(Counter(b['state'] for n in notes for b in n['bindings']))
     return result
 
 
@@ -147,12 +161,28 @@ def run(args):
     index = get_index(args)
     if not (index / 'atlas.sqlite').is_file():
         raise AtlasError('Index missing. Run init or update; from the repository pass --workspace workspaces/main.')
-    with operation_lock(index):
+    if args.command == 'servi':
+        from .mcp_server import serve
+        return serve(index, args.workspace)
+    return dispatch(args, index)
+
+
+def mutates(a):
+    return (a.command in ('annota', 'collega', 'grafo', 'esporta') or
+            (a.command == 'appunti' and (a.revoke is not None or a.rebind is not None or a.import_file is not None)))
+
+
+def dispatch(args, index):
+    """Readers run on a database snapshot; only mutations queue behind the writer lock."""
+    if not mutates(args):
+        return query(args, index)
+    with operation_lock(index, wait=15):
         return query(args, index)
 
 
 def query(a, index):
     from .visuals import export_graph
+    from . import events
     if hasattr(a, 'related_limit') and not 0 <= a.related_limit <= 50:
         raise AtlasError('--related-limit must be between 0 and 50.')
     if a.command == 'esplora':
@@ -182,10 +212,13 @@ def query(a, index):
         return (memory.format_related(relations) if relations else '') + text
     if a.command == 'stato':
         result = report(index)
-        result['notes'] = [{k: n[k] for k in ('id', 'status', 'active', 'stale_bindings', 'linked_passages')} for n in memory.notes(index)]
+        result['notes'] = [{k: n[k] for k in ('id', 'status', 'active', 'stale_bindings', 'rebind_proposals', 'linked_passages')} for n in memory.notes(index)]
+        result['last_event'] = events.read(index, 0, 1)['last_seq']
         if a.json:
             return result
-        return f"{len(result['fonti'])} sources; {sum(s['status'] not in ('ok','vuoto') for s in result['fonti'])} not extracted.\nCoverage: {index / 'copertura.md'}\nNotes: {len(result['notes'])}; stale: {sum(bool(n['stale_bindings']) for n in result['notes'])}."
+        return (f"{len(result['fonti'])} sources; {sum(s['status'] not in ('ok','vuoto') for s in result['fonti'])} not extracted.\n"
+                f"Coverage: {index / 'copertura.md'}\nNotes: {len(result['notes'])}; "
+                f"with bindings to review: {sum(bool(n['stale_bindings']) for n in result['notes'])} (notes --review).")
     if a.command == 'esporta':
         return export(index, a.limit)
     if a.command in ('annota', 'collega'):
@@ -205,14 +238,29 @@ def query(a, index):
         result = memory.related(index, a.riferimenti, a.limit)
         return result if a.json else memory.format_related(result) or 'No recorded links. This does not prove independence.'
     if a.command == 'appunti':
-        if a.revoke is not None:
-            result = memory.revoke(index, a.revoke)
+        if sum(x is not None for x in (a.revoke, a.rebind, a.import_file)) > 1:
+            raise AtlasError('Use one of --revoke, --rebind or --import.')
+        if a.revoke is not None or a.rebind is not None or a.import_file is not None:
+            if a.revoke is not None:
+                result = memory.revoke(index, a.revoke, a.author)
+            elif a.rebind is not None:
+                result = memory.accept_rebind(index, a.rebind, a.author)
+            else:
+                result = memory.import_notes(index, a.import_file, a.author, a.keep_status)
             try:
                 export_graph(index)
             except (AtlasError, OSError) as exc:
-                result['visualization_warning'] = 'Note revoked; graph export failed: ' + str(exc)
+                result['visualization_warning'] = 'Memory change saved; graph export failed: ' + str(exc)
             return result
+        if a.review:
+            return memory.review(index)
         return memory.notes(index, a.id)
+    if a.command == 'eventi':
+        if a.verify:
+            return events.verify(index)
+        if not 1 <= a.limit <= 1000 or a.since < 0:
+            raise AtlasError('--limit must be 1–1000 and --since non-negative.')
+        return events.read(index, a.since, a.limit)
     if a.command == 'grafo':
         if a.rebuild:
             from .graph import build_dependencies
@@ -229,7 +277,8 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         result = run(args)
-        print(result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2))
+        if result is not None:
+            print(result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (AtlasError, OSError, sqlite3.Error, ValueError, KeyError) as exc:
         print('Synapse KB: ' + str(exc), file=sys.stderr)

@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import sys
+import time
 import tomllib
 
 from .common import AtlasError, PROFILES
@@ -104,6 +105,9 @@ to attach it or explicitly instruct their agent to read it.
    selection of candidates, not verified logic. Read relevant targets and full
    notes (`notes ID`); use `dependencies REF --limit 1000` for more links.
    A score is a ranking, not a probability. Ask about scope before choosing a rule.
+   `reference` links were stated by a document itself; `heuristic` links are
+   lexical guesses. A note marked WRITTEN FOR OTHER TEXT was attached to wording
+   that has since changed: read both before using it.
 4. Cite what you actually read. An appunto/NOTE remains a separate observation;
    it does not override an authoritative source. Conflicts require clarification.
 5. If asked to remember an observation, use `annotate "text" --title "topic"
@@ -113,8 +117,10 @@ to attach it or explicitly instruct their agent to read it.
    when a correction was not explicitly requested. Use `notes --revoke ID`
    to revoke, never delete the generated Markdown to remove a note.
 6. Run `update` after source edits made by the user. Do not edit sources yourself
-   unless asked. Review stale bindings with `notes`; changed source revisions
-   are not automatically rebound. Back up the entire workspace.
+   unless asked. A note follows its passage only while the annotated text is
+   identical. `notes --review` lists the rest with a proposed new place; show
+   them to the user. Only a person decides `notes --rebind ID --author NAME`.
+   Back up the entire workspace.
 
 ## Privacy and bounds
 
@@ -126,23 +132,32 @@ source material and must stay out of public Git history.
 
 
 @contextmanager
-def operation_lock(index):
-    """Shared CLI operation lock. OS releases it on process termination."""
+def operation_lock(index, wait=0.0):
+    """Writer lock for one index. OS releases it on process termination.
+
+    Only mutations take it; reading relies on SQLite snapshots. `wait` is how
+    long a short mutation queues behind another writer before giving up.
+    """
     index.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + wait
     with (index / '.operation.lock').open('a+b') as handle:
         if handle.tell() == 0:
             handle.write(b'0')
             handle.flush()
-        handle.seek(0)
-        try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            raise AtlasError('Another Synapse KB operation is running on this index.') from exc
+        while True:
+            handle.seek(0)
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise AtlasError('Another Synapse KB writer is running on this index.') from exc
+                time.sleep(0.05)
         yield
 
 

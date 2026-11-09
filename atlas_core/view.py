@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from .common import AtlasError, GENERIC, STOP, clean, digest, keywords, safe_child, sha_file, slug, terms, words, query_words
+from .common import AtlasError, GENERIC, STOP, clean, digest, keywords, safe_child, sha_file, slug, stem_prefix, terms, words, query_words
 from .index import connect, get_root, meta, reference
 
 
@@ -88,6 +88,10 @@ def read_bytes(db, index, source, start, end):
                       (source['id'], floor, end))
     pieces = []
     position = start
+    if not cache.is_file():
+        # Derived text of a superseded revision is removed at once; a reader that
+        # started before a concurrent update must retry, never read other text.
+        raise AtlasError('Indice aggiornato durante la lettura (index updated while reading): ripetere il comando.')
     with cache.open('rb') as stream:
         for row in rows:
             stream.seek(row['start'])
@@ -311,8 +315,17 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
         joined = ' JOIN nodes n ON n.id=search.rowid' if extra else ''
         score = '0' if all_matches else 'bm25(search,3.0,1.0)'
         order = ' ORDER BY search.rowid' if all_matches else ' ORDER BY score,search.rowid'
-        for operator in ((' AND ',) if all_matches else (' AND ', ' OR ')):
-            expression = operator.join(quoted)
+        # Second tier: every term still required, but inflected forms are accepted
+        # through a prefix (eccezione/eccezioni, return/returned). Reported as such.
+        variants = ['"' + stem_prefix(t) + '"*' if len(t) >= 4 and t.isascii() and t.isalpha() else q
+                    for t, q in zip(tokens, quoted)]
+        tiers = [(' AND ', quoted, mode)]
+        if not all_matches:
+            if variants != quoted:
+                tiers.append((' AND ', variants, 'tutti i termini solo con VARIANTI di desinenza (prefisso); corrispondenze da verificare'))
+            tiers.append((' OR ', quoted, 'NESSUN passaggio contiene tutti i termini; candidati PARZIALI, da verificare'))
+        for operator, parts, tier_mode in tiers:
+            expression = operator.join(parts)
             if all_matches:
                 total = db.execute('SELECT count(*) FROM search' + joined + ' WHERE search MATCH ?' + extra,
                                    [expression, *params]).fetchone()[0]
@@ -323,8 +336,7 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
                               + ('ORDER BY n.id' if all_matches else 'ORDER BY top.score,n.id'),
                               [expression, *params, limit if all_matches else max(64, limit * 10), offset]).fetchall()
             if rows:
-                if operator == ' OR ':
-                    mode = 'NESSUN passaggio contiene tutti i termini; candidati PARZIALI, da verificare'
+                mode = tier_mode
                 break
         # First diversify, then fill from remaining candidates; never silently cap one-source queries at two hits.
         counts, picked, deferred = {}, [], []
@@ -346,7 +358,7 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
                 checked[row['sid']] = check_source(db, index, row['sid'])
             source = checked[row['sid']]
             raw = read_bytes(db, index, source, row['start'], row['end']).decode('utf-8')
-            positions = [raw.casefold().find(t) for t in tokens if t in raw.casefold()]
+            positions = [raw.casefold().find(stem_prefix(t)) for t in tokens if stem_prefix(t) in raw.casefold()]
             pos = max(0, min(positions) - 80) if positions else 0
             excerpt = clean(raw[pos:pos + 340], 300)
             crumb = json.loads(row['crumbs'])
