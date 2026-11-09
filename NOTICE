@@ -1,0 +1,8 @@
+Synapse KB
+Copyright (c) 2026 Tiziano Carpentieri
+
+The reusable extraction/navigation engine and dependency heuristics are adapted
+from the author's earlier local Atlas prototype. Private corpora, experimental
+outputs and domain-specific operator instructions are not part of this release.
+
+See LICENSE and THIRD_PARTY_NOTICES.md.

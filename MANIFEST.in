@@ -1,0 +1,10 @@
+include LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md README.it.md AGENTS.md
+include pack.py atlas.py requirements-dev.txt
+recursive-include atlas_core *.py *.html
+recursive-include examples *.md
+recursive-include docs *.md
+recursive-include tests *.py
+recursive-include scripts *.py
+recursive-include schemas *.json
+prune workspaces
+prune local-only
