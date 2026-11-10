@@ -119,7 +119,8 @@ def export_graph(index: Path):
     (out / 'graph.json').write_text(encoded + '\n', encoding='utf-8')
     template = files('atlas_core').joinpath('viewer.html').read_text(encoding='utf-8')
     # Prevent document text from terminating the script element.
-    safe_json = encoded.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    compact = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))  # the page is read by a browser, not a person
+    safe_json = compact.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     (out / 'graph.html').write_text(template.replace('/*__ATLAS_DATA__*/', safe_json), encoding='utf-8')
     result = export_vault(out / 'obsidian', payload)
     return result
