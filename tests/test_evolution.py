@@ -464,7 +464,7 @@ class McpTests(Workspace):
 
 class VisualTests(Workspace):
     documents = {
-        'Lavoro/Progetti: 2026/piano.md': '# Piano annuale\n\nThe Vega return window is cited here; see Vega return window.\n',
+        'Lavoro/Progetti #2026/piano.md': '# Piano annuale\n\nThe Vega return window is cited here; see Vega return window.\n',
         'wiki/vega.md': RULE,
         'sciolto.txt': 'Text without headings and without a folder.\n',
     }
@@ -506,7 +506,7 @@ class VisualTests(Workspace):
         self.assertTrue([f for f in files if f.startswith('wiki/vega — Refunds ') and f != 'wiki/vega — Refunds.md'])
         self.assertEqual(mine.read_text(encoding='utf-8'), 'mine')
         self.assertEqual(settings.read_text(encoding='utf-8'), '{"mine": true}')
-        (self.source / 'Lavoro/Progetti: 2026/piano.md').unlink()
+        (self.source / 'Lavoro/Progetti #2026/piano.md').unlink()
         update(self.source, self.index)
         self.assertFalse((self.vault() / 'Lavoro').exists())
         export_graph(self.index)
