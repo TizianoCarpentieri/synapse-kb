@@ -6,7 +6,7 @@ Local document navigation, dependency candidates and shared observations for
 LLM agents with filesystem and terminal access. Start with a folder you already
 have; let your agent guide the setup and apply your own working rules.
 
-**Status: alpha, 0.2.0a1.** This is a working toolkit and an experimental contract
+**Status: alpha, 0.3.0a1.** This is a working toolkit and an experimental contract
 for evidence navigation. It is not an established standard or a proven improvement
 in model accuracy. See [evaluation](docs/EVALUATION.md) and [limitations](docs/LIMITATIONS.md).
 
@@ -14,6 +14,10 @@ in model accuracy. See [evaluation](docs/EVALUATION.md) and [limitations](docs/L
 [Commands](docs/CLI.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [0.2 review and benchmarks](docs/EVOLUTION.md) ·
 [Before publishing](docs/PUBLISHING.md)
+
+**If you are an AI agent and were given this link:** clone the repository,
+read [AGENTS.md](AGENTS.md) and follow its steps with the user, one question
+at a time. You need a shell on their machine.
 
 ## Try it
 
@@ -44,15 +48,18 @@ are bounded snapshots; their counts disclose what is included and omitted.
 
 ## Let your agent guide you
 
-Open the cloned repository in an agent that can read local files and run commands.
-Send:
+Give the link to an agent that can run commands on your computer:
 
-> Read AGENTS.md and help me set up Synapse KB. Ask whether I already have a
-> documentation folder and whether I want custom rules or defaults. Guide me
-> one step at a time, then verify the setup with a search and a source reading.
+> Set up Synapse KB for my documents:
+> https://github.com/TizianoCarpentieri/synapse-kb
+> Follow its AGENTS.md step by step.
 
-The agent configures a **separate workspace**, connects your existing source
-folder without moving or editing it, and writes local rules and instructions.
+The agent downloads the tool, asks where your documents are, configures a
+**separate workspace** next to them without moving or editing them, collects
+your answer rules and your guidance for each branch of the collection (what to
+establish before answering, which folder serves which case), and proves the
+result with a real question. `doctor --workspace PATH` tells it, and you, what
+is still missing.
 Open the resulting workspace for everyday use. An agent that recognizes
 [AGENTS.md](https://agents.md/) can discover those instructions; other hosts need
 an explicit instruction to read the file. Chat-only models cannot do this themselves.
@@ -92,6 +99,10 @@ all visual layout, tables or images. See [format support](docs/FORMATS.md).
 
 ## What makes this useful
 
+- `consult "question"`: one call that searches, reads the matching sections and
+  returns them with related evidence and the owner's guidance for that branch.
+- Guidance per folder or document, written by you, stored in the workspace and
+  returned with every search and read under that path.
 - Original document paths, H1–H6 context, source hashes and continuation cursors.
 - Local full-text search and structural navigation, without embeddings.
 - Candidate exceptions, prerequisites, scope limits and superseding notices

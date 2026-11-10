@@ -25,6 +25,9 @@ explicit versioning and conformance fixtures.
 8. A component that ranks or proposes may be heuristic or statistical. A
    component that states a reference, quote, hash, coordinate or binding must
    be reproducible and checkable by equality. Output must say which is which.
+9. Guidance for the agent comes only from the workspace owner's configuration,
+   never from indexed sources. It is returned labelled, with its scope and hash,
+   separately from source text.
 
 ## Current JSON interfaces
 
@@ -43,6 +46,12 @@ the cue, the cue sentence's byte range in the normalized text and its SHA-256.
 `drifted`.
 Note items expose note ID, status, attribution, timestamp, expiry and full-read
 command. Candidates and note excerpts do not replace full source reading.
+
+`consult --json` returns `query`, `mode`, `terms`, `guidance`, `related`,
+`passages` (read records plus `read_as`: section, passage with neighbours, or
+passage) and `other_candidates`. `guidance` is `items` (scope, sha256, text,
+truncated) and `omitted`; search and explore carry the same block, read
+carries it per record with each guide given once.
 
 `notes --json` lists per binding a `state` (exact, relocated, drifted, stale),
 `similarity`, `flags` and `reason`. `events --json` returns journal rows with

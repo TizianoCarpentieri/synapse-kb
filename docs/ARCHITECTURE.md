@@ -9,7 +9,9 @@
 cues; it makes no model calls. `memory.py` owns attributed observations and
 derived note/manual links. `reconcile.py` decides where a binding points after
 a source changed. `relations.py` types cue sentences and recognises stated
-references. `events.py` is the append-only journal. `mcp_server.py` exposes the
+references. `guides.py` returns the owner's guidance for a path; `consult.py` chains search,
+section reading, related evidence and guidance into one call.
+`events.py` is the append-only journal. `mcp_server.py` exposes the
 CLI operations over MCP stdio. `visuals.py` produces offline snapshots.
 `workspace.py` and `cli.py` implement setup, configuration and command routing.
 
@@ -24,6 +26,7 @@ patching and embedded alternative CLI implementations have been removed.
 |---|---|
 | Original documents | Evidence; never rewritten by this tool |
 | atlas.toml / RULES.md | User configuration and agent policy |
+| guides/<path>/GUIDE.md | The owner's guidance per folder or document; in the workspace, never in sources |
 | sources / nodes / search | Derived index with hashes and provenance |
 | dependencies | Rebuildable heuristic candidates |
 | shared_notes | Durable observations with body, author, status, date and expiry |
@@ -75,7 +78,7 @@ cited heading whose title is unique in the corpus (`origin: reference`).
 Selection is bounded per node. Its scores are not
 calibrated confidence values. Broad or misleading headings remain a known risk.
 
-HTML embeds escaped JSON and uses DOM text nodes for source text. It contains
+HTML embeds escaped JSON, draws on a canvas and uses DOM text nodes for the side panel. It contains
 no CDN, fetch or external script. Macro view groups passages by source and top
 heading; micro view shows passages and notes. Both add folder and document
 nodes joined by `struttura` edges: these say where a text is stored and are

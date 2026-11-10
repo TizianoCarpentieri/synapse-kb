@@ -122,7 +122,14 @@ def row_text(node, db):
     if node['kind'] == 'group' and node['sid'] is not None:
         suffix = (f' [byte {node["start"]}–{node["end"]}]' if node['line'] == node['end_line']
                   else f' [righe {node["line"]}–{node["end_line"]}]')
-    return f'- {label(node)}{suffix} → {reference(db, node["id"])}'
+    name = label(node)
+    if node['kind'] in ('document', 'unavailable') and node['sid'] is not None:
+        # The path, not the bare file name: folders are how the collection is organised.
+        row = db.execute('SELECT path FROM sources WHERE id=?', (node['sid'],)).fetchone()
+        name = clean(row[0], 160) + (' [non estratto]' if node['kind'] == 'unavailable' else '') if row else name
+    elif node['kind'] == 'directory':
+        name = clean(node['title'], 160) + '/'
+    return f'- {name}{suffix} → {reference(db, node["id"])}'
 
 
 def frontier(db, node, budget=1600):
@@ -200,7 +207,40 @@ def explore(index: Path, selector='root', budget=1600, offset=0, as_json=False):
         return header + '\n'.join(selected) + '\n' + footer
 
 
-def read(index: Path, selectors, budget=12000, offset=0, verify=False, as_json=False, neighbors=0):
+def enclosing_section(db, node):
+    """The smallest heading that contains a passage, or its document when it has no heading."""
+    row = db.execute('SELECT * FROM nodes WHERE sid=? AND kind="heading" AND start<=? AND end>? ORDER BY level DESC,start DESC LIMIT 1',
+                     (node['sid'], node['start'], node['start'])).fetchone()
+    return row or db.execute('SELECT n.* FROM nodes n JOIN sources s ON s.root_node=n.id WHERE s.id=?', (node['sid'],)).fetchone()
+
+
+def localize(index: Path, selectors):
+    """Accept the absolute path of an original file wherever a relative one is accepted.
+
+    An agent that found a document on disk can hand that path to the tool
+    instead of opening the file and losing related evidence and guidance.
+    """
+    result = []
+    root = None
+    for selector in selectors:
+        text, line = str(selector), ''
+        match = re.match(r'^(.*):(\d+)$', text)
+        if match and not re.fullmatch(r'[A-Za-z]:\d+', text):
+            text, line = match[1], ':' + match[2]
+        if re.match(r'^(?:[A-Za-z]:[\\/]|/|\\\\)', text) and not re.fullmatch(r'[nd]\d+-[0-9a-f]{8}', text):
+            if root is None:
+                with connect(index) as db:
+                    root = get_root(db, index)
+            try:
+                relative = Path(text).resolve().relative_to(root.resolve()).as_posix()
+                selector = ('.' if relative == '.' else relative) + line
+            except (ValueError, OSError):
+                raise AtlasError('This path is outside the indexed collection (' + str(root) + '): ' + text)
+        result.append(selector if selector != '.' else 'root')
+    return result
+
+
+def read(index: Path, selectors, budget=12000, offset=0, verify=False, as_json=False, neighbors=0, section=False):
     if budget < 600 or budget > 1000000:
         raise AtlasError('Budget lettura ammesso: 600–1000000 caratteri.')
     if not selectors or len(selectors) > 64:
@@ -222,6 +262,8 @@ def read(index: Path, selectors, budget=12000, offset=0, verify=False, as_json=F
             if first:
                 source = check_source(db, index, node['sid'], verify)
                 seen_sources[node['sid']] = source
+            if section and node['kind'] in ('passage', 'group'):
+                node = enclosing_section(db, node)
             if neighbors and node['kind'] == 'passage':
                 node = dict(node)
                 before = db.execute('SELECT start,line FROM nodes WHERE sid=? AND kind="passage" AND start<? ORDER BY start DESC LIMIT ?',
@@ -374,7 +416,7 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
             records.append({'ref': reference(db, row['id']), 'fonte': row['path'], 'inizio_byte': row['start'],
                             'fine_byte': row['end'], 'riga': row['line'], 'titolo': title, 'estratto': excerpt})
         if not rows:
-            output += '\nNessuna corrispondenza lessicale. Non prova l’assenza del concetto; provare altri termini o gli strumenti nativi.\n'
+            output += '\nNessuna corrispondenza lessicale (no lexical match). Non prova l’assenza del concetto: provare sinonimi, termini più brevi oppure esplora.\n'
         elif not all_matches and len(records) < len(rows):
             output += '\nSono disponibili altri candidati: aumentare --limit/--max-chars oppure restringere la richiesta.\n'
         cursor = offset + len(records) if all_matches and offset + len(records) < total else None

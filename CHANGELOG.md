@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0a1 — prepared 2026-11-10, not yet published
+
+- `consult "question"`: searches, reads the best matches as whole sections
+  where they fit, and returns guidance and related evidence in the same call.
+- Guidance per folder or document (`guide`), stored in `WORKSPACE/guides/`,
+  returned by consult, search, read and explore from the root down; changes
+  are recorded in the event journal. `--no-guide` omits it.
+- `read --section`; absolute paths of original files are accepted wherever a
+  reference is; `--scope`, `--neighbors`, `--all` as English option names.
+- `doctor --workspace PATH` lists setup progress and the next step.
+- The workspace launcher works from any directory.
+- Repository and workspace AGENTS.md rewritten: step-by-step installation from
+  a link, and consulting through one command.
+- MCP: `consult` and `guide` tools; the root guide is part of the server
+  instructions.
+- The HTML graph is drawn on a canvas with a layout that stops when done.
+  On a 55-source, 3,850-passage test corpus the page needed 0.24 s of browser
+  main-thread time instead of 4.1 s.
+
+The first `update` with 0.3 re-indexes every source. Workspaces made earlier
+keep their old launcher and AGENTS.md; to refresh them, copy both from a new
+workspace created with `init`.
+
 ## 0.2.0a1 — prepared 2026-11-09, not yet published
 
 - Note bindings store the annotated text. After a source changes a binding is

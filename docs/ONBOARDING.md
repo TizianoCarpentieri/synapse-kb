@@ -2,13 +2,20 @@
 
 ## Intended conversation
 
-1. “Do you already have a folder of documents, want to create one, or try the demo?”
-2. “Should I apply your own rules, or use the defaults?”
-3. Check the runtime and describe which folder will hold the workspace.
-4. Initialize, inspect coverage, search a real topic, read the result and inspect
-   relevant dependencies. Explain any extraction gaps.
-5. Open the new workspace in the agent host and start a fresh session when needed.
+The user gives an agent the repository link. The agent then:
 
+1. Gets the tool and checks the runtime.
+2. Asks where the documents are (existing folder, new one, or the demo).
+3. Agrees a workspace folder next to the documents and creates it.
+4. Reports what was indexed and what could not be read.
+5. Collects the answer rules, or the choice of defaults.
+6. Collects guidance for the root and for each folder that needs its own
+   procedure, saves it and reads it back.
+7. Answers one real question with `consult`, citing what it read.
+8. Tells the user how to open the workspace for everyday use.
+
+`python atlas.py doctor --workspace PATH` reports which of these are done and
+the single next step, so the flow can be resumed by any agent in any session.
 The repository AGENTS.md defines this flow. Generated workspace instructions
 define everyday use. Existing rules and source files are never overwritten.
 The terminal `init` wizard is an alternative, not an LLM conversation itself.
@@ -26,6 +33,18 @@ Keep a workspace outside an existing source folder. A new empty or demo source
 lives under `workspace/documents/`; its index is a sibling, not inside the sources.
 Each workspace connects one source root. Use a common parent folder with exclusions
 or separate workspaces for multiple roots. There is no federation in this alpha.
+
+## Guidance by branch
+
+`RULES.md` says how to answer everywhere. A guide says how to proceed in one
+branch: what to establish first and where to go next. Guides live in
+`WORKSPACE/guides/<path>/GUIDE.md`, mirror the folder tree of the documents and
+are saved with `guide "PATH" --set-file FILE` (no path: the root). Every search,
+read, explore and consult returns the guides from the root down to the text it
+returns, general first. A file called GUIDE.md inside the documents is an
+ordinary document: only the workspace owner's folder can hold guidance.
+Whether a model follows a guide is up to the model; the tool makes sure it is
+shown, labelled and attributed.
 
 ## User rules that are worth collecting
 

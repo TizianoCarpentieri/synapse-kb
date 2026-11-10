@@ -10,9 +10,11 @@ workspace, use its `python atlas.py` launcher. For advanced existing Atlas layou
 | English | Italian | Purpose |
 |---|---|---|
 | init | inizia | New empty workspace, external source folder or demo |
-| doctor | doctor | Python, FTS5, optional pypdf availability |
+| doctor | doctor | Python, FTS5, optional pypdf; with `--workspace`, setup progress and next step |
 | build | prepara | Index a source directory, optionally with --output |
 | update | aggiorna | Reuse workspace configuration and rebuild graph |
+| consult | consulta | Search, read the matching sections, related evidence and guidance in one call |
+| guide | guida | Show or set the owner's guidance for a folder or document |
 | explore | esplora | Structural navigation, H1–H6 and branch references |
 | search | cerca | Full-text candidate search |
 | read | leggi | Source reading, context, continuations and related evidence |
@@ -29,6 +31,14 @@ workspace, use its `python atlas.py` launcher. For advanced existing Atlas layou
 ## Common operations
 
 ```sh
+python atlas.py consult "words of the question" --workspace workspaces/main
+python atlas.py guide --set-file root-guide.txt --workspace workspaces/main
+python atlas.py guide "Folder/Sub" --set "What to establish first here." --workspace workspaces/main
+python atlas.py guide "Folder/Sub" --workspace workspaces/main
+python atlas.py guide --list --workspace workspaces/main
+python atlas.py read REFERENCE --section --workspace workspaces/main
+python atlas.py read "/absolute/path/of/an/original/file.docx" --workspace workspaces/main
+python atlas.py doctor --workspace workspaces/main
 python atlas.py search "topic" --workspace workspaces/main --json
 python atlas.py read REFERENCE --workspace workspaces/main --vicini 1 --verifica
 python atlas.py dependencies REFERENCE --workspace workspaces/main --limit 1000
@@ -99,7 +109,7 @@ another writer; `build`/`update` stop at once if a writer is active. `events
   "args": ["/absolute/path/to/atlas.py", "serve", "--workspace", "/absolute/path/to/workspaces/main"]}}}
 ```
 
-Tools: search, read, explore, dependencies, status, notes, review_bindings,
+Tools: consult, guide, search, read, explore, dependencies, status, notes, review_bindings,
 events, annotate, link, revoke_note, accept_rebind, update. Results carry the
 same JSON as `--json`. Resources `synapse://status`, `synapse://notes` and
 `synapse://events` can be subscribed to. Host configuration formats differ;

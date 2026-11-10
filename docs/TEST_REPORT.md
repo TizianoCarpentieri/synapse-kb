@@ -1,4 +1,4 @@
-# Verification record — 2026-11-09, release 0.2.0a1
+# Verification record — 2026-11-10, release 0.3.0a1
 
 This records local checks of the prepared alpha. It does not imply publication,
 remote CI success, model accuracy or independent validation.
@@ -14,8 +14,9 @@ not re-run for 0.2.
 
 | Check | Result |
 |---|---|
-| Full unittest suite | 110 tests passed, about 7 s, also with ResourceWarning as error |
-| HTML graph in headless Chromium | Rendered on a 52-source generated corpus; folder filter, level switch, "Only linked" and node inspection exercised; no page errors, no external requests |
+| Full unittest suite | 119 tests passed, about 8 s, also with ResourceWarning as error |
+| HTML graph in headless Chromium | 55 sources, 3,850 passages: side list, node selection, canvas click, search, relationship filter, keyboard; no page errors, no external requests. Main-thread time to a settled view 0.24 s (SVG version 4.1 s); with all 950 passages 0.55 s (6.35 s) |
+| Guidance and consult | Root and folder guides returned by consult, search, read and explore; exception from another file returned with the rule; launcher run from another directory |
 | Portable archive | Built; offline bundle test passed |
 | Synthetic retrieval | 2/2 expected cross-file targets within first six candidates |
 | Synthetic memory lifecycle | Automatic note visible; revocation effective |
@@ -38,7 +39,11 @@ not re-run for 0.2.
   notification through the SDK client; protocol revision 2026-07-28.
 - Any local model: none could be downloaded, so no model latency or memory
   figure exists.
-- A fresh end-to-end conversation in a real agent host.
+- A fresh end-to-end conversation in a real agent host: neither the new
+  installation steps nor whether agents now stay with `consult` instead of
+  opening files has been observed with a real model.
+- The HTML graph in a desktop browser with GPU rendering, where the SVG
+  version was reported not to load.
 - Held-out answer-quality A/B experiments or independent edge annotation.
 - Corpora above 65,000 passages; real (non-generated) documents at scale.
 - Exhaustive adversarial-parser or interruption testing.

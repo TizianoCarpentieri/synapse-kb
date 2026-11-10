@@ -10,7 +10,9 @@ import sys
 
 from .common import AtlasError, DEFAULT_PROFILE, PROFILES, VERSION
 from .index import build
-from .view import explore, export, find, read, report
+from .view import explore, export, find, localize, read, report
+from .consult import consult
+from . import guides
 from .workspace import doctor, init_workspace, load_workspace, operation_lock
 from . import memory
 
@@ -27,12 +29,13 @@ def parser():
     c.add_argument('--profile', choices=PROFILES, default=DEFAULT_PROFILE)
     c.add_argument('--exclude', action='append', default=[])
     c.add_argument('--no-build', action='store_true')
-    sub.add_parser('doctor', help='Check local Python, SQLite FTS5 and optional PDF support.')
+    c = sub.add_parser('doctor', help='Check the runtime; with --workspace, show setup progress and the next step.')
+    c.add_argument('--workspace', type=Path)
     aliases = {'prepara': ['build'], 'aggiorna': ['update'], 'esplora': ['explore'],
                'cerca': ['search'], 'leggi': ['read'], 'stato': ['status'],
                'esporta': ['export'], 'annota': ['annotate'], 'collega': ['link'],
                'dipendenze': ['dependencies'], 'appunti': ['notes'], 'grafo': ['graph'],
-               'eventi': ['events'], 'servi': ['serve']}
+               'eventi': ['events'], 'servi': ['serve'], 'consulta': ['consult'], 'guida': ['guide']}
     for name, names in aliases.items():
         c = sub.add_parser(name, aliases=names)
         c.set_defaults(command=name)
@@ -51,24 +54,32 @@ def parser():
             c.add_argument('--ricostruisci', action='store_true')
             c.add_argument('--max-mib', type=int, default=2048)
             c.add_argument('--quiet', action='store_true')
-        elif name in ('esplora', 'cerca', 'leggi'):
-            c.add_argument('--max-chars', type=int, default=12000 if name == 'leggi' else 1600)
-            c.add_argument('--offset', type=int, default=0)
+        elif name in ('esplora', 'cerca', 'leggi', 'consulta'):
+            c.add_argument('--max-chars', type=int, default={'leggi': 12000, 'consulta': 9000}.get(name, 1600))
             c.add_argument('--no-graph', action='store_true', help='Disable related evidence for controlled A/B tests.')
-            c.add_argument('--related-limit', type=int, default=6)
+            c.add_argument('--no-guide', action='store_true', help='Omit the workspace guidance for this branch.')
+            c.add_argument('--related-limit', type=int, default=8 if name == 'consulta' else 6)
+            if name == 'consulta':
+                c.add_argument('richiesta', help='Words of the question; one call searches, reads and adds related evidence.')
+                c.add_argument('--ambito', '--scope', default='root')
+                c.add_argument('--limit', type=int, default=3, help='Source texts to read in full (1–8).')
+                continue
+            c.add_argument('--offset', type=int, default=0)
             if name == 'esplora':
                 c.add_argument('riferimento', nargs='?', default='root')
                 c.add_argument('--richiesta')
             elif name == 'cerca':
                 c.add_argument('richiesta')
-                c.add_argument('--ambito', default='root')
+                c.add_argument('--ambito', '--scope', default='root')
                 c.add_argument('--limit', type=int, default=6)
-                c.add_argument('--tutti', action='store_true')
+                c.add_argument('--tutti', '--all', action='store_true')
                 c.add_argument('--edizione')
             else:
                 c.add_argument('riferimenti', nargs='+')
                 c.add_argument('--verifica', action='store_true')
-                c.add_argument('--vicini', type=int, default=0)
+                c.add_argument('--vicini', '--neighbors', type=int, default=0)
+                c.add_argument('--sezione', '--section', action='store_true',
+                               help='Read the whole section that contains the passage.')
         elif name == 'esporta':
             c.add_argument('--limit', type=int, default=200)
         elif name in ('annota', 'collega'):
@@ -104,6 +115,13 @@ def parser():
             c.add_argument('--verify', '--verifica', action='store_true', help='Recompute the hash chain.')
         elif name == 'grafo':
             c.add_argument('--rebuild', action='store_true')
+        elif name == 'guida':
+            c.add_argument('ambito', nargs='?', default='root', help='Folder or document path in the collection; root by default.')
+            c.add_argument('--set', dest='set_text', metavar='TEXT', help='Replace the guide of this scope.')
+            c.add_argument('--set-file', type=Path, metavar='FILE', help='Replace the guide with the content of a text file.')
+            c.add_argument('--remove', action='store_true')
+            c.add_argument('--list', dest='list_all', action='store_true')
+            c.add_argument('--author', default='owner')
     return p
 
 
@@ -130,15 +148,23 @@ def get_index(args):
 
 def run(args):
     if args.command == 'doctor':
-        return doctor()
+        return doctor(args.workspace)
     if args.command in ('init', 'inizia'):
         work = init_workspace(args.workspace, args.source, args.demo, args.rules_file, args.profile, args.exclude, args.empty)
-        result = {'workspace': str(work), 'next': 'Open this workspace with your tool-capable agent and read AGENTS.md.'}
+        result = {'workspace': str(work), 'next': 'Run doctor --workspace on this folder: it names the next setup step. '
+                                                    'For everyday use open the folder with a tool-capable agent and read its AGENTS.md.'}
         # A tiny portable launcher preserves the configured rules workspace and avoids shell quoting.
         launch = Path(sys.argv[0]).resolve()
         if launch.is_file() and launch.suffix in ('.py', '.pyz'):
             import_path = launch if launch.suffix == '.pyz' else launch.parent
-            (work / 'atlas.py').write_text('import runpy, sys\nsys.path.insert(0, ' + repr(str(import_path)) + ')\nrunpy.run_path(' + repr(str(launch)) + ", run_name='__main__')\n", encoding='utf-8')
+            # Works from any current directory: it names its own workspace unless the caller names one.
+            (work / 'atlas.py').write_text(
+                'import os, runpy, sys\n'
+                'named = any(a.split("=")[0] in ("--workspace", "--indice", "--index") for a in sys.argv[1:])\n'
+                'if len(sys.argv) > 1 and not named and sys.argv[1] not in ("init", "inizia", "build", "prepara", "--version", "-h", "--help"):\n'
+                '    sys.argv += ["--workspace", os.path.dirname(os.path.abspath(__file__))]\n'
+                'sys.path.insert(0, ' + repr(str(import_path)) + ')\nrunpy.run_path(' + repr(str(launch)) + ", run_name='__main__')\n",
+                encoding='utf-8')
         if not args.no_build:
             work, source, config = load_workspace(work)
             with operation_lock(work / '_atlas'):
@@ -169,6 +195,7 @@ def run(args):
 
 def mutates(a):
     return (a.command in ('annota', 'collega', 'grafo', 'esporta') or
+            (a.command == 'guida' and (a.set_text is not None or a.set_file is not None or a.remove)) or
             (a.command == 'appunti' and (a.revoke is not None or a.rebind is not None or a.import_file is not None)))
 
 
@@ -185,35 +212,66 @@ def query(a, index):
     from . import events
     if hasattr(a, 'related_limit') and not 0 <= a.related_limit <= 50:
         raise AtlasError('--related-limit must be between 0 and 50.')
+    guided = lambda paths: guides.chain(index, paths) if not a.no_guide else None
+    if a.command == 'consulta':
+        return consult(index, a.richiesta, localize(index, [a.ambito])[0], a.limit, a.max_chars,
+                       a.related_limit, not a.no_graph, not a.no_guide, a.json)
     if a.command == 'esplora':
+        a.riferimento = localize(index, [a.riferimento])[0]
         if not a.richiesta:
-            return explore(index, a.riferimento, a.max_chars, a.offset, a.json)
+            data = explore(index, a.riferimento, a.max_chars, a.offset, a.json)
+            guidance = guided([guides.scope_of(index, a.riferimento)])
+            if a.json:
+                return data | {'guidance': guidance}
+            return (guides.format_chain(guidance) if guidance else '') + data
         a.command, a.ambito, a.limit = 'cerca', a.riferimento, 6
         a.tutti, a.edizione = False, None
         return query(a, index)
     if a.command == 'cerca':
+        a.ambito = localize(index, [a.ambito])[0]
         data = find(index, a.richiesta, a.ambito, a.limit, a.max_chars, True, a.tutti, a.offset, a.edizione)
         refs = [r['ref'] for r in data['risultati']]
         relations = memory.related(index, refs, a.related_limit) if refs and not a.no_graph else None
+        guidance = guided([r['fonte'] for r in data['risultati']] + [guides.scope_of(index, a.ambito)])
         if a.json:
-            data['related'] = relations
+            data['related'], data['guidance'] = relations, guidance
             return data
         text = find(index, a.richiesta, a.ambito, a.limit, a.max_chars, False, a.tutti, a.offset, a.edizione)
-        return (memory.format_related(relations) if relations else '') + text
+        return (guides.format_chain(guidance) if guidance else '') + (memory.format_related(relations) if relations else '') + text
     if a.command == 'leggi':
-        data = read(index, a.riferimenti, a.max_chars, a.offset, a.verifica, True, a.vicini)
+        a.riferimenti = localize(index, a.riferimenti)
+        data = read(index, a.riferimenti, a.max_chars, a.offset, a.verifica, True, a.vicini, a.sezione)
+        guidance = guided([r['fonte'] for r in data])
         if a.json:
+            given = set()
             for record in data:
                 record['related'] = memory.related(index, [record['ref']], a.related_limit) if not a.no_graph else None
+                # Each guide once per response, on the first record it applies to.
+                own = guides.chain(index, [record['fonte']]) if guidance else None
+                if own:
+                    own['items'] = [g for g in own['items'] if g['scope'] not in given]
+                    given.update(g['scope'] for g in own['items'])
+                record['guidance'] = own
             return data
-        text = read(index, a.riferimenti, a.max_chars, a.offset, a.verifica, False, a.vicini)
+        text = read(index, a.riferimenti, a.max_chars, a.offset, a.verifica, False, a.vicini, a.sezione)
         refs = [r['ref'] for r in data]
         relations = memory.related(index, refs, a.related_limit) if refs and not a.no_graph else None
-        return (memory.format_related(relations) if relations else '') + text
+        return (guides.format_chain(guidance) if guidance else '') + (memory.format_related(relations) if relations else '') + text
+    if a.command == 'guida':
+        if a.list_all:
+            return guides.listing(index)
+        if a.set_text is not None or a.set_file is not None or a.remove:
+            if sum((a.set_text is not None, a.set_file is not None, a.remove)) != 1:
+                raise AtlasError('Use one of --set, --set-file or --remove.')
+            text = '' if a.remove else a.set_text if a.set_text is not None else a.set_file.read_text(encoding='utf-8-sig')
+            return guides.save(index, localize(index, [a.ambito])[0], text, a.author)
+        data = guides.show(index, localize(index, [a.ambito])[0])
+        return data if a.json else guides.format_chain(data) or 'No guidance for this scope or the folders above it.'
     if a.command == 'stato':
         result = report(index)
         result['notes'] = [{k: n[k] for k in ('id', 'status', 'active', 'stale_bindings', 'rebind_proposals', 'linked_passages')} for n in memory.notes(index)]
         result['last_event'] = events.read(index, 0, 1)['last_seq']
+        result['guides'] = guides.listing(index)
         if a.json:
             return result
         return (f"{len(result['fonti'])} sources; {sum(s['status'] not in ('ok','vuoto') for s in result['fonti'])} not extracted.\n"
@@ -235,7 +293,7 @@ def query(a, index):
     if a.command == 'dipendenze':
         if not 1 <= a.limit <= 1000:
             raise AtlasError('--limit must be 1–1000.')
-        result = memory.related(index, a.riferimenti, a.limit)
+        result = memory.related(index, localize(index, a.riferimenti), a.limit)
         return result if a.json else memory.format_related(result) or 'No recorded links. This does not prove independence.'
     if a.command == 'appunti':
         if sum(x is not None for x in (a.revoke, a.rebind, a.import_file)) > 1:

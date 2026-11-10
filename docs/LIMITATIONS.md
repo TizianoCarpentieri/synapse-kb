@@ -24,6 +24,11 @@
   lists and can miss a reversal expressed differently. Passages annotated with
   0.1 gain their stored text at the first 0.2 update, provided the source has
   not changed since. No legacy Atlas database migration.
+- Guidance is shown, labelled and attributed; nothing forces a model to follow
+  it or to keep using the tool instead of opening files. `consult` removes
+  steps that made agents leave, but adherence on a given host is unmeasured.
+- `consult` ranks by lexical match: it reads what search ranks first. When the
+  first results are wrong, read the other candidates it lists.
 - Relation typing is a pattern grammar over single sentences. It does not
   resolve pronouns, nested conditions or scope across sentences. A cited
   heading is resolved only when its title is unique in the corpus.
@@ -38,8 +43,8 @@
   text output is not fully localized; inherited extraction diagnostics are Italian.
 - The graph builder loads passage metadata/phrases into memory: about 2.1 GiB
   at 65,000 passages on the generated benchmark corpus, and every update
-  rebuilds all edges. The browser viewer uses a small force simulation and has
-  not been validated for very large corpora.
+  rebuilds all edges. The browser viewer shows a bounded snapshot (650 sections
+  or 950 passages); it was measured in headless Chromium only.
 - PDF parsing and document archives are not sandboxed. Resource limits in the
   extractor are not a complete defense against adversarial files.
 - Local indexing does not make a cloud model conversation local. Agent tools may

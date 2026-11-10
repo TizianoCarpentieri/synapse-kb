@@ -7,16 +7,21 @@ struttura, ricerca locale, collegamenti candidati e appunti condivisi.
 L'agente ti guida nella configurazione: documenti già esistenti o nuova raccolta,
 regole personalizzate oppure comportamento predefinito.
 
-Versione **alpha 0.2.0a1**. Il progetto funziona come strumento locale; il vantaggio
+Versione **alpha 0.3.0a1**. Il progetto funziona come strumento locale; il vantaggio
 sulla qualità delle risposte richiede ancora un confronto indipendente.
 
 ## Avvio con l'agente
 
-Clona la repo, aprila come cartella di lavoro del tuo agente e scrivi:
+Basta dare il link a un agente che può eseguire comandi sul tuo computer:
 
-> Leggi AGENTS.md e guidami nella configurazione di Synapse KB. Chiedimi se ho
-> già una cartella documentale e se voglio regole particolari o quelle di default.
-> Procedi un passo alla volta e verifica il risultato con ricerca e lettura.
+> Configura Synapse KB per i miei documenti:
+> https://github.com/TizianoCarpentieri/synapse-kb
+> Segui il suo AGENTS.md un passo alla volta.
+
+L'agente scarica lo strumento, ti chiede dove sono i documenti, crea accanto una
+cartella di lavoro separata, raccoglie le tue regole e le istruzioni per ciascun
+ramo della documentazione (cosa stabilire prima di rispondere, quale cartella
+serve quale caso) e verifica tutto con una domanda reale.
 
 Serve un agente con accesso a file e terminale. La repo non installa un modello
 e non avvia una chat. Il caricamento automatico di AGENTS.md dipende dall'host;
