@@ -239,6 +239,37 @@ class SearchTests(Workspace):
         self.assertEqual([stem_prefix(w) for w in ('policies', 'eccezione', 'rule', 'iso9001', 'città')],
                          ['polic', 'eccezion', 'rule', 'iso9001', 'città'])
 
+    def test_limit_scales_budget_and_diversifies_headings_and_branches(self):
+        body = ' '.join(f'calibration word{i}' for i in range(155))
+        sections = []
+        for idx in range(4):
+            sections.append(f'## Beacon Standard\n\n{body} Beacon Standard details {idx}.\n'
+                            f'See [Beacon Standard table](https://example.invalid/beacon-{idx}).\n')
+        for name in ('Small', 'Medium', 'Large', 'Max'):
+            sections.append(f'## Beacon Pass {name}\n\nBeacon Pass {name} includes quota and rules. {body}.\n'
+                            f'Reference [Beacon Pass {name}](https://example.invalid/pass-{name.lower()}).\n')
+        put(self.source / 'consumer/catalog.md', '# Catalog\n\n' + '\n'.join(sections))
+        for idx in range(3):
+            put(self.source / f'enterprise/plan{idx}.md', f'# Enterprise {idx}\n\n## Corporate Beacon {idx}\n\nBeacon corporate rule {idx}.\n')
+        update(self.source, self.index)
+        hits = find(self.index, 'Beacon', limit=8, as_json=True)['risultati']
+        self.assertEqual(len(hits), 8)
+        titles = [h['titolo'] for h in hits]
+        self.assertEqual(titles.count('Beacon Standard'), 1)
+        self.assertTrue({'Beacon Pass Small', 'Beacon Pass Medium', 'Beacon Pass Large'} <= set(titles))
+        for hit in hits:
+            if hit['titolo'].startswith('Beacon Pass '):
+                self.assertIn('includes quota and rules', hit['estratto'])
+
+    def test_multiword_query_anchors_on_rarest_term_and_inflected_variants(self):
+        for idx in range(6):
+            put(self.source / f'general/doc{idx}.md', f'# Guide {idx}\n\n## Opzioni tariffarie {idx}\n\nLe opzioni tariffarie standard consentono di navigare.\n')
+        put(self.source / 'consumer/estero.md',
+            '# Estero\n\n## Pacchetto Borealis\n\nPer l\'opzione dedicata Borealis sono inclusi i viaggi verso Zephyria e altri territori.\n')
+        update(self.source, self.index)
+        hits = find(self.index, 'opzioni tariffarie Zephyria navigare', limit=6, as_json=True)['risultati']
+        self.assertTrue(any(h['fonte'] == 'consumer/estero.md' for h in hits))
+
 
 class JournalAndMergeTests(Workspace):
     def test_chain_records_mutations_and_detects_tampering(self):

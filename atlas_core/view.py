@@ -327,8 +327,10 @@ def read(index: Path, selectors, budget=12000, offset=0, verify=False, as_json=F
     return records if as_json else output
 
 
-def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=False,
+def find(index: Path, query: str, scope='root', limit=6, budget=None, as_json=False,
          all_matches=False, offset=0, edition=None):
+    if budget is None:
+        budget = min(100000, max(3200, limit * 520))
     if not 600 <= budget <= 100000 or not 1 <= limit <= 50:
         raise AtlasError('Budget 600–100000 caratteri; limite 1–50 risultati.')
     if offset < 0 or (offset and not all_matches):
@@ -349,7 +351,7 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
         elif scope not in {'.', 'root', ''}:
             extra = ' AND n.id IN (WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT nodes.id FROM nodes JOIN sub ON nodes.parent=sub.id) SELECT id FROM sub)'
             params = [node['id']]
-        rows = []
+        rows, row_exprs = [], {}
         mode = 'tutti i termini'
         total = None
         # Select the top window inside FTS first, then join only those rows to the wide metadata.
@@ -365,30 +367,75 @@ def find(index: Path, query: str, scope='root', limit=6, budget=1600, as_json=Fa
         if not all_matches:
             if variants != quoted:
                 tiers.append((' AND ', variants, 'tutti i termini solo con VARIANTI di desinenza (prefisso); corrispondenze da verificare'))
-            tiers.append((' OR ', quoted, 'NESSUN passaggio contiene tutti i termini; candidati PARZIALI, da verificare'))
+            if len(variants) >= 2:
+                counts_by_term = [(len(db.execute('SELECT rowid FROM search WHERE search MATCH ? LIMIT 500', [v]).fetchall()), -len(v), i, v)
+                                  for i, v in enumerate(variants)]
+                present = [item for item in counts_by_term if item[0] > 0]
+                if len(present) >= 2:
+                    present.sort()
+                    rarest = present[0][3]
+                    others = [item[3] for item in present[1:]]
+                    tiers.append((' ANCHOR ', [f'{rarest} AND ({" OR ".join(others)})'],
+                                  'termini principali e varianti; corrispondenze parziali da verificare'))
+            tiers.append((' OR ', variants, 'NESSUN passaggio contiene tutti i termini; candidati PARZIALI, da verificare'))
         for operator, parts, tier_mode in tiers:
-            expression = operator.join(parts)
+            if operator == ' OR ' and rows:
+                break
+            expression = parts[0] if operator == ' ANCHOR ' else operator.join(parts)
             if all_matches:
                 total = db.execute('SELECT count(*) FROM search' + joined + ' WHERE search MATCH ?' + extra,
                                    [expression, *params]).fetchone()[0]
             top = (f'SELECT search.rowid id,{score} score FROM search{joined} WHERE search MATCH ?' + extra
                    + order + ' LIMIT ? OFFSET ?')
-            rows = db.execute('SELECT n.*,s.path,top.score FROM (' + top + ') top '
-                              'JOIN nodes n ON n.id=top.id JOIN sources s ON s.id=n.sid '
-                              + ('ORDER BY n.id' if all_matches else 'ORDER BY top.score,n.id'),
-                              [expression, *params, limit if all_matches else max(64, limit * 10), offset]).fetchall()
-            if rows:
-                mode = tier_mode
-                break
-        # First diversify, then fill from remaining candidates; never silently cap one-source queries at two hits.
-        counts, picked, deferred = {}, [], []
+            found = db.execute('SELECT n.*,s.path,top.score FROM (' + top + ') top '
+                               'JOIN nodes n ON n.id=top.id JOIN sources s ON s.id=n.sid '
+                               + ('ORDER BY n.id' if all_matches else 'ORDER BY top.score,n.id'),
+                               [expression, *params, limit if all_matches else max(64, limit * 10), offset]).fetchall()
+            if found:
+                if not rows:
+                    rows = list(found)
+                    row_exprs = {r['id']: expression for r in rows}
+                    mode = tier_mode
+                else:
+                    seen_ids = {r['id'] for r in rows}
+                    added = [r for r in found if r['id'] not in seen_ids]
+                    if added:
+                        rows.extend(added)
+                        row_exprs.update({r['id']: expression for r in added})
+                        if mode == 'tutti i termini':
+                            mode = 'tutti i termini (più varianti o corrispondenze parziali)'
+                if all_matches or len({(r['sid'], r['crumbs']) for r in rows}) >= limit:
+                    break
+        if not all_matches and rows:
+            promoted, seen_ids = [], set()
+            for row in rows:
+                if row['end'] - row['start'] < 400:
+                    lead = db.execute(
+                        'SELECT n.*,s.path,? score FROM search JOIN nodes n ON n.id=search.rowid JOIN sources s ON s.id=n.sid '
+                        'WHERE search MATCH ? AND n.parent=? AND n.kind="passage" AND n.start<? ORDER BY n.start LIMIT 1',
+                        (row['score'], row_exprs[row['id']], row['parent'], row['start'])).fetchone()
+                    if lead is not None:
+                        row = lead
+                if row['id'] not in seen_ids:
+                    promoted.append(row)
+                    seen_ids.add(row['id'])
+            rows = promoted
+        # First diversify by top-level branch, source and section heading, then fill from remaining distinct headings.
+        counts, branch_counts, seen_headings, picked, secondary, repeated = {}, {}, set(), [], [], []
         for row in rows:
-            if counts.get(row['sid'], 0) >= 2:
-                deferred.append(row)
-            else:
+            heading_key = (row['sid'], row['crumbs'])
+            branch = row['path'].split('/', 1)[0]
+            if counts.get(row['sid'], 0) < 2 and branch_counts.get(branch, 0) < 2 and heading_key not in seen_headings:
                 picked.append(row)
                 counts[row['sid']] = counts.get(row['sid'], 0) + 1
-        picked = rows if all_matches else (picked + deferred)[:limit]
+                branch_counts[branch] = branch_counts.get(branch, 0) + 1
+                seen_headings.add(heading_key)
+            elif heading_key not in seen_headings:
+                secondary.append(row)
+                seen_headings.add(heading_key)
+            else:
+                repeated.append(row)
+        picked = rows if all_matches else (picked + secondary + repeated)[:limit]
         header = '# Ricerca: ' + clean(query, 100) + '\n'
         header += (f'{total} passaggi con tutti i termini; elenco paginato, non conteggio delle occorrenze né completezza semantica.\n' if all_matches
                    else mode + '; risultati selezionati, non elenco completo.\n')

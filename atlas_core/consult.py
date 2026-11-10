@@ -26,7 +26,7 @@ def _window(db, node):
 def consult(index, query, scope='root', limit=3, budget=9000, related_limit=8, graph=True, guide=True, as_json=False):
     if not 1 <= limit <= 8 or not 2000 <= budget <= 200000:
         raise AtlasError('consult: --limit 1–8 and --max-chars 2000–200000.')
-    found = find(index, query, scope, max(8, limit * 3), 100000, True)
+    found = find(index, query, scope, max(12, limit * 4), 100000, True)
     # Each text gets room for at least one whole passage; a small budget reads fewer texts.
     limit = max(1, min(limit, budget // 2200))
     share = max(2200, budget // limit)

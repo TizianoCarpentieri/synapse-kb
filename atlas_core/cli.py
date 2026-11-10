@@ -55,7 +55,7 @@ def parser():
             c.add_argument('--max-mib', type=int, default=2048)
             c.add_argument('--quiet', action='store_true')
         elif name in ('esplora', 'cerca', 'leggi', 'consulta'):
-            c.add_argument('--max-chars', type=int, default={'leggi': 12000, 'consulta': 9000}.get(name, 1600))
+            c.add_argument('--max-chars', type=int, default={'leggi': 12000, 'consulta': 9000, 'cerca': None}.get(name, 1600))
             c.add_argument('--no-graph', action='store_true', help='Disable related evidence for controlled A/B tests.')
             c.add_argument('--no-guide', action='store_true', help='Omit the workspace guidance for this branch.')
             c.add_argument('--related-limit', type=int, default=8 if name == 'consulta' else 6)
